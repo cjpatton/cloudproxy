@@ -24,23 +24,26 @@ var _ = math.Inf
 type DirectiveType int32
 
 const (
-	DirectiveType_ERROR           DirectiveType = 0
-	DirectiveType_FATAL           DirectiveType = 1
-	DirectiveType_CREATE_CIRCUIT  DirectiveType = 2
-	DirectiveType_DESTROY_CIRCUIT DirectiveType = 3
+	DirectiveType_ERROR   DirectiveType = 0
+	DirectiveType_FATAL   DirectiveType = 1
+	DirectiveType_CREATE  DirectiveType = 3
+	DirectiveType_CREATED DirectiveType = 4
+	DirectiveType_DESTROY DirectiveType = 5
 )
 
 var DirectiveType_name = map[int32]string{
 	0: "ERROR",
 	1: "FATAL",
-	2: "CREATE_CIRCUIT",
-	3: "DESTROY_CIRCUIT",
+	3: "CREATE",
+	4: "CREATED",
+	5: "DESTROY",
 }
 var DirectiveType_value = map[string]int32{
-	"ERROR":           0,
-	"FATAL":           1,
-	"CREATE_CIRCUIT":  2,
-	"DESTROY_CIRCUIT": 3,
+	"ERROR":   0,
+	"FATAL":   1,
+	"CREATE":  3,
+	"CREATED": 4,
+	"DESTROY": 5,
 }
 
 func (x DirectiveType) Enum() *DirectiveType {

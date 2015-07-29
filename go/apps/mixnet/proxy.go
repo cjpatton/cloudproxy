@@ -56,9 +56,37 @@ func (p *ProxyContext) DialRouter(network, addr string) (*Conn, error) {
 // destination over the mixnet.
 func (p *ProxyContext) CreateCircuit(c net.Conn, circuitAddrs []string) (int, error) {
 	var d Directive
-	d.Type = DirectiveType_CREATE_CIRCUIT.Enum()
+	d.Type = DirectiveType_CREATE.Enum()
 	d.Addrs = circuitAddrs
 	return SendDirective(c, &d)
+}
+
+// ReceiveDirective awaits a reply from the router and return the type of
+// directive received. This is in response to RouterContext.HandleProxy().
+// If the directive type is ERROR or FATAL, return an error.
+func (p *ProxyContext) ReceiveDirective(c net.Conn) (*DirectiveType, error) {
+	var err error
+	cell := make([]byte, CellBytes)
+	if _, err = c.Read(cell); err != nil && err != io.EOF {
+		return nil, err
+	}
+
+	if cell[0] != dirCell {
+		return nil, errBadCellType
+	}
+
+	dirBytes, n := binary.Uvarint(cell[1:])
+	var d Directive
+	if err := proto.Unmarshal(cell[1+n:1+n+int(dirBytes)], &d); err != nil {
+		return nil, err
+	}
+
+	if *d.Type == DirectiveType_ERROR {
+		return nil, errors.New("router error: " + (*d.Error))
+	} else if *d.Type == DirectiveType_FATAL {
+		return nil, errors.New("router error: " + (*d.Error) + " (connection closed)")
+	}
+	return d.Type, nil
 }
 
 // SendMessage directs the router to relay a message over the already constructed
@@ -84,37 +112,6 @@ func (p *ProxyContext) SendMessage(c net.Conn, msg []byte) (int, error) {
 	}
 
 	return bytes, nil
-}
-
-// ReceiveMessage waits for a reply or error message from the router.
-func (p *ProxyContext) ReceiveMessage(c net.Conn, msg []byte) (int, error) {
-	var err error
-	cell := make([]byte, CellBytes)
-	if _, err = c.Read(cell); err != nil && err != io.EOF {
-		return 0, err
-	}
-
-	if cell[0] == msgCell { // Read a message.
-		// TODO(cjpatton)
-
-	} else if cell[0] == dirCell { // Handle a directive.
-		dirBytes, n := binary.Uvarint(cell[1:])
-		var d Directive
-		if err := proto.Unmarshal(cell[1+n:1+n+int(dirBytes)], &d); err != nil {
-			return 0, err
-		}
-
-		switch *d.Type {
-		case DirectiveType_ERROR:
-			return 0, errors.New("router error: " + (*d.Error))
-		case DirectiveType_FATAL:
-			return 0, errors.New("router error: " + (*d.Error) + " (connection closed)")
-		default:
-			return 0, errBadDirective
-		}
-	}
-
-	return 0, errBadCellType
 }
 
 func (p *ProxyContext) nextID() (id uint64) {

@@ -127,7 +127,9 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 	if cell[0] == msgCell { // Handle a message.
 		msgBytes, n := binary.Uvarint(cell[1:])
 		if msgBytes > MaxMsgBytes {
-			hp.SendFatal(c, errMsgLength)
+			if _, err = hp.SendFatal(c, errMsgLength); err != nil {
+				return err
+			}
 			c.Close()
 			return nil
 		}
@@ -157,8 +159,9 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 		}
 
 		// Construct a circuit and establish a connection with the destination.
-		// TODO(cjpatton) For now, only single-hop circuits are supported.
-		if *d.Type == DirectiveType_CREATE_CIRCUIT {
+		// Send a CREATED directive to sender to confirm. For now, only single
+		// hop circuits are supported.
+		if *d.Type == DirectiveType_CREATE {
 			if len(d.Addrs) == 0 {
 				return errBadDirective
 			}
@@ -170,10 +173,16 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 			q.Id = proto.Uint64(c.id)
 			q.Addr = proto.String(d.Addrs[0])
 			hp.sendQueue.Enqueue(q)
+
+			if _, err = SendDirective(c, dirCreated); err != nil {
+				return err
+			}
 		}
 
 	} else { // Unknown cell type, return an error.
-		hp.SendError(c, errBadCellType)
+		if _, err = hp.SendError(c, errBadCellType); err != nil {
+			return err
+		}
 	}
 
 	return nil

@@ -301,7 +301,6 @@ func TestMaliciousProxyRouterRelay(t *testing.T) {
 	ch := make(chan testResult)
 
 	cell := make([]byte, CellBytes)
-	buff := make([]byte, CellBytes*10)
 
 	// Unrecognized cell type.
 	cell[0] = dirCell ^ msgCell ^ relayCell
@@ -313,7 +312,7 @@ func TestMaliciousProxyRouterRelay(t *testing.T) {
 	if _, err = c.Write(cell); err != nil {
 		t.Error(err)
 	}
-	_, err = proxy.ReceiveMessage(c, buff)
+	_, err = proxy.ReceiveDirective(c)
 	if err == nil || err.Error() != "router error: "+errBadCellType.Error() {
 		t.Error("Bad cell, got incorrect error: ", err)
 	}
@@ -331,7 +330,7 @@ func TestMaliciousProxyRouterRelay(t *testing.T) {
 	if _, err = c.Write(cell); err != nil {
 		t.Error(err)
 	}
-	_, err = proxy.ReceiveMessage(c, buff)
+	_, err = proxy.ReceiveDirective(c)
 	if err == nil || err.Error() != "router error: "+errMsgLength.Error()+" (connection closed)" {
 		t.Error("Long message, got incorrect error: ", err)
 	}

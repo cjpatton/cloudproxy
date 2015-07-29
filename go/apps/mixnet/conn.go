@@ -42,6 +42,8 @@ var errBadCellType = errors.New("unrecognized cell type")
 var errBadDirective = errors.New("received bad directive")
 var errMsgLength = errors.New("message too long")
 
+var dirCreated = &Directive{Type: DirectiveType_CREATED.Enum()}
+
 // Conn implements the net.Conn interface. The read and write operations are
 // overloaded to check that only cells are sent between agents in the mixnet
 // protocol.
