@@ -17,6 +17,7 @@ package mixnet
 import (
 	"encoding/binary"
 	"errors"
+	"io"
 	"net"
 
 	"github.com/golang/protobuf/proto"
@@ -78,9 +79,9 @@ func (c *Conn) Write(msg []byte) (n int, err error) {
 
 // SendDirective serializes and pads a directive to the length of a cell and
 // sends it to the router. A directive is signaled to the receiver by the first
-// byte of the cell. The next 8 bytes encodes the length of of the serialized
+// byte of the cell. The next few bytes encode the length of of the serialized
 // protocol buffer. If the buffer doesn't fit in a cell, then throw an error.
-func SendDirective(c net.Conn, d *Directive) (int, error) {
+func (c *Conn) SendDirective(d *Directive) (int, error) {
 	db, err := proto.Marshal(d)
 	if err != nil {
 		return 0, err
@@ -98,6 +99,59 @@ func SendDirective(c net.Conn, d *Directive) (int, error) {
 	copy(cell[1+n:], db)
 
 	return c.Write(cell)
+}
+
+// ReceiveDirective awaits a reply from the router and return the type of
+// directive received. This is in response to RouterContext.HandleProxy().
+// If the directive type is ERROR or FATAL, return an error.
+func (c *Conn) ReceiveDirective() (*Directive, error) {
+	var err error
+	cell := make([]byte, CellBytes)
+	if _, err = c.Read(cell); err != nil && err != io.EOF {
+		return nil, err
+	}
+
+	if cell[0] != dirCell {
+		return nil, errBadCellType
+	}
+
+	dirBytes, n := binary.Uvarint(cell[1:])
+	d := new(Directive)
+	if err := proto.Unmarshal(cell[1+n:1+n+int(dirBytes)], d); err != nil {
+		return nil, err
+	}
+
+	if *d.Type == DirectiveType_ERROR {
+		return nil, errors.New("router error: " + (*d.Error))
+	} else if *d.Type == DirectiveType_FATAL {
+		return nil, errors.New("router error: " + (*d.Error) + " (connection closed)")
+	}
+	return d, nil
+}
+
+// SendMessage divides a message into cells and sends each cell over the network
+// connection. directs the router to relay a message over the already constructed
+// circuit. A message is signaled to the reecevier by the first byte of the first
+// cell. The next few bytes encode the total number of bytes in the message.
+func (c *Conn) SendMessage(msg []byte) (int, error) {
+	msgBytes := len(msg)
+	cell := make([]byte, CellBytes)
+	cell[0] = msgCell
+	n := binary.PutUvarint(cell[1:], uint64(msgBytes))
+
+	bytes := copy(cell[1+n:], msg)
+	if _, err := c.Write(cell); err != nil {
+		return 0, err
+	}
+
+	for bytes < msgBytes {
+		zeroCell(cell)
+		bytes += copy(cell, msg[bytes:])
+		if _, err := c.Write(cell); err != nil {
+			return bytes, err
+		}
+	}
+	return bytes, nil
 }
 
 // Write zeros to each byte of a cell.

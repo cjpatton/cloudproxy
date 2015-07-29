@@ -35,10 +35,12 @@ type RouterContext struct {
 
 	id uint64 // Next serial identifier that will be assigned to a connection.
 
-	// Data structure for queueing and batching outgoing messages.
-	sendQueue *Queue
+	// Data structures for queueing and batching messages from sender to
+	// recipient and recipient to sender respectively.
+	sendQueue  *Queue
+	replyQueue *Queue
 
-	// The send queue and error handler are instantiated as go routines; these
+	// The queues and error handlers are instantiated as go routines; these
 	// channels are for managing them.
 	killQueue             chan bool
 	killQueueErrorHandler chan bool
@@ -174,7 +176,7 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 			q.addr = &d.Addrs[0]
 			hp.sendQueue.Enqueue(q)
 
-			if _, err = SendDirective(c, dirCreated); err != nil {
+			if _, err = c.SendDirective(dirCreated); err != nil {
 				return err
 			}
 		}
@@ -189,20 +191,20 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 }
 
 // SendError sends an error message to a client.
-func (hp *RouterContext) SendError(c net.Conn, err error) (int, error) {
+func (hp *RouterContext) SendError(c *Conn, err error) (int, error) {
 	var d Directive
 	d.Type = DirectiveType_ERROR.Enum()
 	d.Error = proto.String(err.Error())
-	return SendDirective(c, &d)
+	return c.SendDirective(&d)
 }
 
 // SendFatal sends an error message and signals the client that the connection
 // was severed on the server side.
-func (hp *RouterContext) SendFatal(c net.Conn, err error) (int, error) {
+func (hp *RouterContext) SendFatal(c *Conn, err error) (int, error) {
 	var d Directive
 	d.Type = DirectiveType_FATAL.Enum()
 	d.Error = proto.String(err.Error())
-	return SendDirective(c, &d)
+	return c.SendDirective(&d)
 }
 
 // Get the next Id to assign and increment counter.

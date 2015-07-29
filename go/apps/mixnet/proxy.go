@@ -15,12 +15,6 @@
 package mixnet
 
 import (
-	"encoding/binary"
-	"errors"
-	"io"
-	"net"
-
-	"github.com/golang/protobuf/proto"
 	"github.com/jlmucb/cloudproxy/go/tao"
 )
 
@@ -54,64 +48,11 @@ func (p *ProxyContext) DialRouter(network, addr string) (*Conn, error) {
 
 // CreateCircuit directs the router to construct a circuit to a particular
 // destination over the mixnet.
-func (p *ProxyContext) CreateCircuit(c net.Conn, circuitAddrs []string) (int, error) {
+func (p *ProxyContext) CreateCircuit(c *Conn, circuitAddrs []string) (int, error) {
 	var d Directive
 	d.Type = DirectiveType_CREATE.Enum()
 	d.Addrs = circuitAddrs
-	return SendDirective(c, &d)
-}
-
-// ReceiveDirective awaits a reply from the router and return the type of
-// directive received. This is in response to RouterContext.HandleProxy().
-// If the directive type is ERROR or FATAL, return an error.
-func (p *ProxyContext) ReceiveDirective(c net.Conn) (*DirectiveType, error) {
-	var err error
-	cell := make([]byte, CellBytes)
-	if _, err = c.Read(cell); err != nil && err != io.EOF {
-		return nil, err
-	}
-
-	if cell[0] != dirCell {
-		return nil, errBadCellType
-	}
-
-	dirBytes, n := binary.Uvarint(cell[1:])
-	var d Directive
-	if err := proto.Unmarshal(cell[1+n:1+n+int(dirBytes)], &d); err != nil {
-		return nil, err
-	}
-
-	if *d.Type == DirectiveType_ERROR {
-		return nil, errors.New("router error: " + (*d.Error))
-	} else if *d.Type == DirectiveType_FATAL {
-		return nil, errors.New("router error: " + (*d.Error) + " (connection closed)")
-	}
-	return d.Type, nil
-}
-
-// SendMessage directs the router to relay a message over the already constructed
-// circuit. A message is signaled to the reecevier by the first byte of the first
-// cell. The next 8 bytes encode the total number of bytes in the message.
-func (p *ProxyContext) SendMessage(c net.Conn, msg []byte) (int, error) {
-	msgBytes := len(msg)
-	cell := make([]byte, CellBytes)
-	cell[0] = msgCell
-	n := binary.PutUvarint(cell[1:], uint64(msgBytes))
-
-	bytes := copy(cell[1+n:], msg)
-	if _, err := c.Write(cell); err != nil {
-		return 0, err
-	}
-
-	for bytes < msgBytes {
-		zeroCell(cell)
-		bytes += copy(cell, msg[bytes:])
-		if _, err := c.Write(cell); err != nil {
-			return bytes, err
-		}
-	}
-
-	return bytes, nil
+	return c.SendDirective(&d)
 }
 
 func (p *ProxyContext) nextID() (id uint64) {
