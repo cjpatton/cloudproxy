@@ -15,11 +15,12 @@
 package mixnet;
 
 enum DirectiveType {
-  ERROR = 0;   // Signal an error to peer.
-  FATAL = 1;   // Signal an error and that the connection was closed.
-  CREATE = 3;  // Create a circuit.
-  CREATED = 4; // Reply from router confirming the circuit was created.
-  DESTROY = 5; // Destroy a circuit.
+  ERROR = 0;     // Signal an error to peer.
+  FATAL = 1;     // Signal an error and that the connection was closed.
+  CREATE = 3;    // Create a circuit.
+  CREATED = 4;   // Reply from router confirming the circuit was created.
+  DESTROY = 5;   // Destroy a circuit.
+  AWAIT_MSG = 7; // Direct the router to wait for a message.
 }
 
 message Directive {

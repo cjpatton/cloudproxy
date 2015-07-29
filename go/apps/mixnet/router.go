@@ -37,8 +37,8 @@ type RouterContext struct {
 
 	// Data structures for queueing and batching messages from sender to
 	// recipient and recipient to sender respectively.
-	sendQueue  *Queue
-	replyQueue *Queue
+	nextQueue *Queue
+	prevQueue *Queue
 
 	// The queues and error handlers are instantiated as go routines; these
 	// channels are for managing them.
@@ -91,11 +91,15 @@ func NewRouterContext(path, network, addr string, batchSize int, x509Identity *p
 		return nil, err
 	}
 
-	hp.sendQueue = NewQueue(network, batchSize)
+	// Instantiate the queues.
+	hp.nextQueue = NewQueue(network, batchSize)
+	hp.prevQueue = NewQueue(network, batchSize)
 	hp.killQueue = make(chan bool)
 	hp.killQueueErrorHandler = make(chan bool)
-	go hp.sendQueue.DoQueue(hp.killQueue)
-	go hp.sendQueue.DoQueueErrorHandler(hp.killQueueErrorHandler)
+	go hp.nextQueue.DoQueue(hp.killQueue)
+	go hp.prevQueue.DoQueue(hp.killQueue)
+	go hp.nextQueue.DoQueueErrorHandler(hp.killQueueErrorHandler)
+	go hp.prevQueue.DoQueueErrorHandler(hp.killQueueErrorHandler)
 
 	return hp, nil
 }
@@ -112,6 +116,8 @@ func (hp *RouterContext) AcceptProxy() (*Conn, error) {
 // Close releases any resources held by the hosted program.
 func (hp *RouterContext) Close() {
 	hp.killQueue <- true
+	hp.killQueue <- true
+	hp.killQueueErrorHandler <- true
 	hp.killQueueErrorHandler <- true
 	if hp.proxyListener != nil {
 		hp.proxyListener.Close()
@@ -132,6 +138,7 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 			if _, err = hp.SendFatal(c, errMsgLength); err != nil {
 				return err
 			}
+			// TODO(cjpatton) send DESTROY, close connection to next hop.
 			c.Close()
 			return nil
 		}
@@ -151,7 +158,7 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 		q := new(Queueable)
 		q.id = c.id
 		q.msg = msg
-		hp.sendQueue.Enqueue(q)
+		hp.nextQueue.Enqueue(q)
 
 	} else if cell[0] == dirCell { // Handle a directive.
 		dirBytes, n := binary.Uvarint(cell[1:])
@@ -160,10 +167,9 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 			return err
 		}
 
-		// Construct a circuit and establish a connection with the destination.
-		// Send a CREATED directive to sender to confirm. For now, only single
-		// hop circuits are supported.
 		if *d.Type == DirectiveType_CREATE {
+			// Construct a circuit and send a CREATED directive to sender to
+			// confirm. For now, only single hop circuits are supported.
 			if len(d.Addrs) == 0 {
 				return errBadDirective
 			}
@@ -174,10 +180,22 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 			q := new(Queueable)
 			q.id = c.id
 			q.addr = &d.Addrs[0]
-			hp.sendQueue.Enqueue(q)
+			hp.nextQueue.Enqueue(q)
 
-			if _, err = c.SendDirective(dirCreated); err != nil {
-				return err
+			_, err = c.SendDirective(dirCreated)
+			return err
+
+		} else if *d.Type == DirectiveType_AWAIT_MSG {
+			// Wait for a message from the destination, divide it into cells,
+			// and reply to sender.
+			q := new(Queueable)
+			q.id = c.id
+			q.reply = make(chan []byte)
+			hp.nextQueue.Enqueue(q)
+
+			msg := <-q.reply
+			if msg != nil {
+				// TODO(cjpatton) add cells to prevQueue.
 			}
 		}
 

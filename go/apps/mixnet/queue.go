@@ -83,6 +83,7 @@ func (sq *Queue) DoQueue(kill <-chan bool) {
 		select {
 		case <-kill:
 			for _, c := range sq.nextConn {
+				// TODO(cjpatton) send DESTROY to next hop.
 				c.Close()
 			}
 			return
