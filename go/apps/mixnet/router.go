@@ -147,8 +147,8 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 		}
 
 		q := new(Queueable)
-		q.Id = proto.Uint64(c.id)
-		q.Msg = msg
+		q.id = c.id
+		q.msg = msg
 		hp.sendQueue.Enqueue(q)
 
 	} else if cell[0] == dirCell { // Handle a directive.
@@ -170,8 +170,8 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 			}
 
 			q := new(Queueable)
-			q.Id = proto.Uint64(c.id)
-			q.Addr = proto.String(d.Addrs[0])
+			q.id = c.id
+			q.addr = &d.Addrs[0]
 			hp.sendQueue.Enqueue(q)
 
 			if _, err = SendDirective(c, dirCreated); err != nil {

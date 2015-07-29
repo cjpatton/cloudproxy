@@ -23,6 +23,13 @@ import (
 	"github.com/golang/glog"
 )
 
+type Queueable struct {
+	id   uint64
+	dir  *Directive
+	addr *string
+	msg  []byte
+}
+
 type sendQueueError struct {
 	id uint64 // Serial identifier of sender to which error pertains.
 	error
@@ -84,25 +91,25 @@ func (sq *SendQueue) DoSendQueue(kill <-chan bool) {
 			// Set the next-hop address. We don't allow the destination address
 			// or connection to be overwritten in order to avoid accumulating
 			// stale connections on routers.
-			if _, def := sq.nextAddr[*q.Id]; !def && q.Addr != nil {
-				sq.nextAddr[*q.Id] = *q.Addr
+			if _, def := sq.nextAddr[q.id]; !def && q.addr != nil {
+				sq.nextAddr[q.id] = *q.addr
 			}
 
-			if q.Dir != nil {
-				sq.err <- sendQueueError{*q.Id,
+			if q.dir != nil {
+				sq.err <- sendQueueError{q.id,
 					errors.New("directives not implemented")}
 
-			} else if _, def := sq.nextAddr[*q.Id]; !def && q.Msg != nil {
-				sq.err <- sendQueueError{*q.Id,
+			} else if _, def := sq.nextAddr[q.id]; !def && q.msg != nil {
+				sq.err <- sendQueueError{q.id,
 					errors.New("request to send message without a destination")}
 
 			} else {
 
 				// Create a send buffer for the sender ID if it doesn't exist.
-				if _, def := sq.sendBuffer[*q.Id]; !def {
-					sq.sendBuffer[*q.Id] = list.New()
+				if _, def := sq.sendBuffer[q.id]; !def {
+					sq.sendBuffer[q.id] = list.New()
 				}
-				buf := sq.sendBuffer[*q.Id]
+				buf := sq.sendBuffer[q.id]
 
 				// The buffer was empty but now has a message ready; increment
 				// the counter.
@@ -111,7 +118,7 @@ func (sq *SendQueue) DoSendQueue(kill <-chan bool) {
 				}
 
 				// Add message to send buffer.
-				buf.PushBack(q.Msg)
+				buf.PushBack(q.msg)
 			}
 
 			// Transmit the message batch if it is full.

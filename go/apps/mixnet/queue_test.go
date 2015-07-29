@@ -18,8 +18,6 @@ import (
 	"fmt"
 	"net"
 	"testing"
-
-	"github.com/golang/protobuf/proto"
 )
 
 // A dummy server that accepts ct connections and waits for a message
@@ -90,9 +88,9 @@ func TestSendQueue(t *testing.T) {
 		// Enqueue some messages.
 		for i := 0; i < clientCt; i++ {
 			q := new(Queueable)
-			q.Id = proto.Uint64(uint64(i))
-			q.Addr = proto.String(dstAddr)
-			q.Msg = []byte(
+			q.id = uint64(i)
+			q.addr = &dstAddr
+			q.msg = []byte(
 				fmt.Sprintf("I am anonymous, but my ID is %d.", i))
 			sq.Enqueue(q)
 		}
