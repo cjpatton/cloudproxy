@@ -24,10 +24,10 @@ import (
 )
 
 type Queueable struct {
-	id   uint64
-	dir  *Directive
-	addr *string
-	msg  []byte
+	id    uint64
+	addr  *string
+	msg   []byte
+	reply chan []byte
 }
 
 type sendQueueError struct {
@@ -95,31 +95,26 @@ func (sq *SendQueue) DoSendQueue(kill <-chan bool) {
 				sq.nextAddr[q.id] = *q.addr
 			}
 
-			if q.dir != nil {
-				sq.err <- sendQueueError{q.id,
-					errors.New("directives not implemented")}
-
-			} else if _, def := sq.nextAddr[q.id]; !def && q.msg != nil {
+			if _, def := sq.nextAddr[q.id]; !def {
 				sq.err <- sendQueueError{q.id,
 					errors.New("request to send message without a destination")}
-
-			} else {
-
-				// Create a send buffer for the sender ID if it doesn't exist.
-				if _, def := sq.sendBuffer[q.id]; !def {
-					sq.sendBuffer[q.id] = list.New()
-				}
-				buf := sq.sendBuffer[q.id]
-
-				// The buffer was empty but now has a message ready; increment
-				// the counter.
-				if buf.Len() == 0 {
-					sq.ct++
-				}
-
-				// Add message to send buffer.
-				buf.PushBack(q.msg)
+				continue
 			}
+
+			// Create a send buffer for the sender ID if it doesn't exist.
+			if _, def := sq.sendBuffer[q.id]; !def {
+				sq.sendBuffer[q.id] = list.New()
+			}
+			buf := sq.sendBuffer[q.id]
+
+			// The buffer was empty but now has a message ready; increment
+			// the counter.
+			if buf.Len() == 0 {
+				sq.ct++
+			}
+
+			// Add message to send buffer.
+			buf.PushBack(q)
 
 			// Transmit the message batch if it is full.
 			if sq.ct >= sq.batchSize {
@@ -163,9 +158,9 @@ func (sq *SendQueue) dequeue() {
 	ch := make(chan senderResult)
 	for _, id := range ids[:sq.batchSize] {
 		addr := sq.nextAddr[id]
-		msg := sq.sendBuffer[id].Front().Value.([]byte)
+		q := sq.sendBuffer[id].Front().Value.(Queueable)
 		c, def := sq.nextConn[id]
-		go senderWorker(sq.network, addr, id, msg, c, def, ch, sq.err)
+		go senderWorker(sq.network, addr, id, q, c, def, ch, sq.err)
 	}
 
 	// Wait for workers to finish.
@@ -191,7 +186,7 @@ type senderResult struct {
 	id uint64
 }
 
-func senderWorker(network, addr string, id uint64, msg []byte, c net.Conn, def bool,
+func senderWorker(network, addr string, id uint64, q Queueable, c net.Conn, def bool,
 	res chan<- senderResult, err chan<- sendQueueError) {
 	var e error
 
@@ -207,12 +202,28 @@ func senderWorker(network, addr string, id uint64, msg []byte, c net.Conn, def b
 		}
 	}
 
-	// Send the message.
-	if _, e := c.Write(msg); e != nil {
-		err <- sendQueueError{id, e}
-		res <- senderResult{nil, id}
-		return
+	if q.msg != nil { // Send the message.
+		if _, e := c.Write(q.msg); e != nil {
+			err <- sendQueueError{id, e}
+			res <- senderResult{nil, id}
+			return
+		}
+
 	}
 
+	if q.reply != nil { // Receive a message.
+		msg := make([]byte, MaxMsgBytes)
+		bytes, e := c.Read(msg)
+		if e != nil {
+			err <- sendQueueError{id, e}
+			res <- senderResult{nil, id}
+			q.reply <- []byte{}
+			return
+		}
+
+		// Pass message to channel.
+		q.reply <- msg[:bytes]
+
+	}
 	res <- senderResult{c, id}
 }

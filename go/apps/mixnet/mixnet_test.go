@@ -268,7 +268,7 @@ func TestProxyRouterRelay(t *testing.T) {
 		len(msg),  // A long message
 	}
 
-	go runDummyServer(len(trials), 1, dstCh)
+	go runDummyServer(len(trials), 1, dstCh, receiver)
 
 	for _, l := range trials {
 
