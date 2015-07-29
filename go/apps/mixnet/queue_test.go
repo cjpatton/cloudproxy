@@ -75,16 +75,16 @@ func runDummyServer(clientCt, msgCt int, ch chan<- testResult, t serverType) {
 	}
 }
 
-// Test SendQueue by enqueueing a bunch of messages and dequeueing them.
+// Test Queue by enqueueing a bunch of messages and dequeueing them.
 // Test multiple rounds.
-func TestSendQueueSend(t *testing.T) {
+func TestQueueSend(t *testing.T) {
 
 	// batchSize must divide clientCt; otherwise the sendQueue will block forever.
 	batchSize := 2
 	clientCt := 4
 	msgCt := 3
 
-	sq := NewSendQueue(network, batchSize)
+	sq := NewQueue(network, batchSize)
 	kill := make(chan bool)
 	done := make(chan bool)
 	dstCh := make(chan testResult)
@@ -92,12 +92,12 @@ func TestSendQueueSend(t *testing.T) {
 	go runDummyServer(clientCt, msgCt, dstCh, receiver)
 
 	go func() {
-		sq.DoSendQueue(kill)
+		sq.DoQueue(kill)
 		done <- true
 	}()
 
 	go func() {
-		sq.DoSendQueueErrorHandler(kill)
+		sq.DoQueueErrorHandler(kill)
 		done <- true
 	}()
 
@@ -131,11 +131,11 @@ func TestSendQueueSend(t *testing.T) {
 	<-done
 }
 
-func TestSendQueueReceive(t *testing.T) {
+func TestQueueReceive(t *testing.T) {
 
 	msgCt := 1
 
-	sq := NewSendQueue(network, 1)
+	sq := NewQueue(network, 1)
 	kill := make(chan bool)
 	done := make(chan bool)
 	dstCh := make(chan testResult)
@@ -143,12 +143,12 @@ func TestSendQueueReceive(t *testing.T) {
 	go runDummyServer(1, msgCt, dstCh, sender)
 
 	go func() {
-		sq.DoSendQueue(kill)
+		sq.DoQueue(kill)
 		done <- true
 	}()
 
 	go func() {
-		sq.DoSendQueueErrorHandler(kill)
+		sq.DoQueueErrorHandler(kill)
 		done <- true
 	}()
 

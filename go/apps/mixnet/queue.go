@@ -35,11 +35,11 @@ type sendQueueError struct {
 	error
 }
 
-// The SendQueue structure maps a serial identifier corresponding to a sender
+// The Queue structure maps a serial identifier corresponding to a sender
 // (in the router context) to a destination. It also maintains a message buffer
 // for each sender. Once there messages ready on enough buffers, a batch of
 // messages are transmitted simultaneously.
-type SendQueue struct {
+type Queue struct {
 	batchSize int // Number of messages to transmit in a roud.
 	ct        int // Current number of buffers with messages ready.
 
@@ -53,9 +53,9 @@ type SendQueue struct {
 	err   chan sendQueueError // Channel for handling errors.
 }
 
-// NewSendQueue creates a new SendQueue structure.
-func NewSendQueue(network string, batchSize int) (sq *SendQueue) {
-	sq = new(SendQueue)
+// NewQueue creates a new Queue structure.
+func NewQueue(network string, batchSize int) (sq *Queue) {
+	sq = new(Queue)
 	sq.batchSize = batchSize
 	sq.network = network
 
@@ -70,15 +70,15 @@ func NewSendQueue(network string, batchSize int) (sq *SendQueue) {
 
 // Enqueue adds a queueable object, such as a message or directive, to the
 // send queue.
-func (sq *SendQueue) Enqueue(q *Queueable) {
+func (sq *Queue) Enqueue(q *Queueable) {
 	sq.queue <- *q
 }
 
-// DoSendQueue adds messages to a queue and transmits messages in batches.
+// DoQueue adds messages to a queue and transmits messages in batches.
 // Typically a message is a cell, but when the calling router is an exit point,
 // the message length is arbitrary. A batch is transmitted when there are
 // messages on batchSize distinct sender channels.
-func (sq *SendQueue) DoSendQueue(kill <-chan bool) {
+func (sq *Queue) DoQueue(kill <-chan bool) {
 	for {
 		select {
 		case <-kill:
@@ -124,10 +124,10 @@ func (sq *SendQueue) DoSendQueue(kill <-chan bool) {
 	}
 }
 
-// DoSendQueueErrorHandler handles errors produced by DoSendQueue. When this
+// DoQueueErrorHandler handles errors produced by DoQueue. When this
 // is fully fleshed out, it will enqueue into the response queue a Directive
 // containing an error message. For now, just print out the error.
-func (sq *SendQueue) DoSendQueueErrorHandler(kill <-chan bool) {
+func (sq *Queue) DoQueueErrorHandler(kill <-chan bool) {
 	for {
 		select {
 		case <-kill:
@@ -139,9 +139,9 @@ func (sq *SendQueue) DoSendQueueErrorHandler(kill <-chan bool) {
 }
 
 // dequeue sends one message from each send buffer for each serial ID in a
-// random order. This is called by DoSendQueue and is not safe to call directly
+// random order. This is called by DoQueue and is not safe to call directly
 // elsewhere.
-func (sq *SendQueue) dequeue() {
+func (sq *Queue) dequeue() {
 
 	// Shuffle the serial IDs.
 	order := rand.Perm(int(sq.ct)) // TODO(cjpatton) Use tao.GetRandomBytes().

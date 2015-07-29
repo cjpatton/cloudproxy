@@ -36,12 +36,12 @@ type RouterContext struct {
 	id uint64 // Next serial identifier that will be assigned to a connection.
 
 	// Data structure for queueing and batching outgoing messages.
-	sendQueue *SendQueue
+	sendQueue *Queue
 
 	// The send queue and error handler are instantiated as go routines; these
 	// channels are for managing them.
-	killSendQueue             chan bool
-	killSendQueueErrorHandler chan bool
+	killQueue             chan bool
+	killQueueErrorHandler chan bool
 
 	network string // Network protocol, e.g. "tcp"
 }
@@ -89,11 +89,11 @@ func NewRouterContext(path, network, addr string, batchSize int, x509Identity *p
 		return nil, err
 	}
 
-	hp.sendQueue = NewSendQueue(network, batchSize)
-	hp.killSendQueue = make(chan bool)
-	hp.killSendQueueErrorHandler = make(chan bool)
-	go hp.sendQueue.DoSendQueue(hp.killSendQueue)
-	go hp.sendQueue.DoSendQueueErrorHandler(hp.killSendQueueErrorHandler)
+	hp.sendQueue = NewQueue(network, batchSize)
+	hp.killQueue = make(chan bool)
+	hp.killQueueErrorHandler = make(chan bool)
+	go hp.sendQueue.DoQueue(hp.killQueue)
+	go hp.sendQueue.DoQueueErrorHandler(hp.killQueueErrorHandler)
 
 	return hp, nil
 }
@@ -109,8 +109,8 @@ func (hp *RouterContext) AcceptProxy() (*Conn, error) {
 
 // Close releases any resources held by the hosted program.
 func (hp *RouterContext) Close() {
-	hp.killSendQueue <- true
-	hp.killSendQueueErrorHandler <- true
+	hp.killQueue <- true
+	hp.killQueueErrorHandler <- true
 	if hp.proxyListener != nil {
 		hp.proxyListener.Close()
 	}
