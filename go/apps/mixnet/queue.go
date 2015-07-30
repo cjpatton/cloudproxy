@@ -50,7 +50,7 @@ type Queue struct {
 	nextConn   map[uint64]net.Conn   // Connection to destination.
 	sendBuffer map[uint64]*list.List // Message buffer of sender.
 
-	queue chan Queueable      // Channel for queueing messages/directives.
+	queue chan *Queueable     // Channel for queueing messages/directives.
 	err   chan sendQueueError // Channel for handling errors.
 }
 
@@ -64,18 +64,18 @@ func NewQueue(network string, batchSize int) (sq *Queue) {
 	sq.nextConn = make(map[uint64]net.Conn)
 	sq.sendBuffer = make(map[uint64]*list.List)
 
-	sq.queue = make(chan Queueable)
+	sq.queue = make(chan *Queueable)
 	sq.err = make(chan sendQueueError)
 	return sq
 }
 
 func (sq *Queue) Enqueue(q *Queueable) {
-	sq.queue <- *q
+	sq.queue <- q
 }
 
 // EnqueueMsg
 func (sq *Queue) EnqueueMsg(id uint64, msg []byte) {
-	var q Queueable
+	q := new(Queueable)
 	q.id = id
 	q.msg = make([]byte, len(msg))
 	copy(q.msg, msg)
@@ -84,7 +84,7 @@ func (sq *Queue) EnqueueMsg(id uint64, msg []byte) {
 
 // EnqueueAddr
 func (sq *Queue) EnqueueReply(id uint64, reply chan []byte) {
-	var q Queueable
+	q := new(Queueable)
 	q.id = id
 	q.reply = reply
 	sq.queue <- q
@@ -92,7 +92,7 @@ func (sq *Queue) EnqueueReply(id uint64, reply chan []byte) {
 
 // EnqueueAddr
 func (sq *Queue) SetAddr(id uint64, addr string) {
-	var q Queueable
+	q := new(Queueable)
 	q.id = id
 	q.addr = new(string)
 	*q.addr = addr
@@ -101,7 +101,7 @@ func (sq *Queue) SetAddr(id uint64, addr string) {
 
 // EnqueueConn
 func (sq *Queue) SetConn(id uint64, c net.Conn) {
-	var q Queueable
+	q := new(Queueable)
 	q.id = id
 	q.conn = c
 	sq.queue <- q
@@ -202,7 +202,7 @@ func (sq *Queue) dequeue() {
 	ch := make(chan senderResult)
 	for _, id := range ids[:sq.batchSize] {
 		addr := sq.nextAddr[id]
-		q := sq.sendBuffer[id].Front().Value.(Queueable)
+		q := sq.sendBuffer[id].Front().Value.(*Queueable)
 		c, def := sq.nextConn[id]
 		go senderWorker(sq.network, addr, id, q, c, def, ch, sq.err)
 	}
@@ -230,7 +230,7 @@ type senderResult struct {
 	id uint64
 }
 
-func senderWorker(network, addr string, id uint64, q Queueable, c net.Conn, def bool,
+func senderWorker(network, addr string, id uint64, q *Queueable, c net.Conn, def bool,
 	res chan<- senderResult, err chan<- sendQueueError) {
 	var e error
 
