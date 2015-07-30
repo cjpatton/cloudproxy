@@ -29,6 +29,49 @@ const (
 
 var sendTemplate = "You are client no. %d, this is msg. no. %d. "
 
+func runDummyServerWriteOne(msg []byte, ch chan<- testResult) {
+	l, err := net.Listen(network, dstAddr)
+	if err != nil {
+		ch <- testResult{err, []byte{}}
+		return
+	}
+	defer l.Close()
+
+	c, err := l.Accept()
+	if err != nil {
+		ch <- testResult{err, []byte{}}
+		return
+	}
+	defer c.Close()
+
+	_, err = c.Write(msg)
+	ch <- testResult{err, nil}
+}
+
+func runDummyServerReadOne(ch chan<- testResult) {
+	l, err := net.Listen(network, dstAddr)
+	if err != nil {
+		ch <- testResult{err, []byte{}}
+		return
+	}
+	defer l.Close()
+
+	c, err := l.Accept()
+	if err != nil {
+		ch <- testResult{err, []byte{}}
+		return
+	}
+	defer c.Close()
+
+	buf := make([]byte, CellBytes*10)
+	bytes, err := c.Read(buf)
+	if err != nil {
+		ch <- testResult{err, nil}
+		return
+	}
+	ch <- testResult{nil, buf[:bytes]}
+}
+
 // A dummy server that accepts ct connections and waits for a message
 // from each client.
 func runDummyServer(clientCt, msgCt int, ch chan<- testResult, t serverType) {

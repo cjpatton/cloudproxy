@@ -69,10 +69,42 @@ func NewQueue(network string, batchSize int) (sq *Queue) {
 	return sq
 }
 
-// Enqueue adds a queueable object, such as a message or directive, to the
-// send queue.
 func (sq *Queue) Enqueue(q *Queueable) {
 	sq.queue <- *q
+}
+
+// EnqueueMsg
+func (sq *Queue) EnqueueMsg(id uint64, msg []byte) {
+	var q Queueable
+	q.id = id
+	q.msg = make([]byte, len(msg))
+	copy(q.msg, msg)
+	sq.queue <- q
+}
+
+// EnqueueAddr
+func (sq *Queue) EnqueueReply(id uint64, reply chan []byte) {
+	var q Queueable
+	q.id = id
+	q.reply = reply
+	sq.queue <- q
+}
+
+// EnqueueAddr
+func (sq *Queue) SetAddr(id uint64, addr string) {
+	var q Queueable
+	q.id = id
+	q.addr = new(string)
+	*q.addr = addr
+	sq.queue <- q
+}
+
+// EnqueueConn
+func (sq *Queue) SetConn(id uint64, c net.Conn) {
+	var q Queueable
+	q.id = id
+	q.conn = c
+	sq.queue <- q
 }
 
 // DoQueue adds messages to a queue and transmits messages in batches.
@@ -104,30 +136,33 @@ func (sq *Queue) DoQueue(kill <-chan bool) {
 				sq.nextConn[q.id] = q.conn
 			}
 
-			if _, def := sq.nextAddr[q.id]; !def {
-				sq.err <- sendQueueError{q.id,
-					errors.New("request to send message without a destination")}
-				continue
-			}
+			if q.msg != nil || q.reply != nil {
 
-			// Create a send buffer for the sender ID if it doesn't exist.
-			if _, def := sq.sendBuffer[q.id]; !def {
-				sq.sendBuffer[q.id] = list.New()
-			}
-			buf := sq.sendBuffer[q.id]
+				if _, def := sq.nextAddr[q.id]; !def {
+					sq.err <- sendQueueError{q.id,
+						errors.New("request to send/receive message without a destination")}
+					continue
+				}
 
-			// The buffer was empty but now has a message ready; increment
-			// the counter.
-			if buf.Len() == 0 {
-				sq.ct++
-			}
+				// Create a send buffer for the sender ID if it doesn't exist.
+				if _, def := sq.sendBuffer[q.id]; !def {
+					sq.sendBuffer[q.id] = list.New()
+				}
+				buf := sq.sendBuffer[q.id]
 
-			// Add message to send buffer.
-			buf.PushBack(q)
+				// The buffer was empty but now has a message ready; increment
+				// the counter.
+				if buf.Len() == 0 {
+					sq.ct++
+				}
 
-			// Transmit the message batch if it is full.
-			if sq.ct >= sq.batchSize {
-				sq.dequeue()
+				// Add message to send buffer.
+				buf.PushBack(q)
+
+				// Transmit the message batch if it is full.
+				if sq.ct >= sq.batchSize {
+					sq.dequeue()
+				}
 			}
 		}
 	}

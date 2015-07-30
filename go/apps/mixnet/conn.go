@@ -114,7 +114,7 @@ func (c *Conn) ReceiveDirective(d *Directive) (int, error) {
 	}
 
 	if cell[0] != dirCell {
-		return bytes, errBadCellType
+		return bytes, errCellType
 	}
 
 	dirBytes, n := binary.Uvarint(cell[1:])

@@ -18,9 +18,7 @@ import (
 	"bytes"
 	"crypto/x509/pkix"
 	"encoding/binary"
-	"fmt"
 	"io"
-	"net"
 	"os"
 	"path"
 	"testing"
@@ -171,35 +169,7 @@ func runProxyReceiveMessage(proxy *ProxyContext) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("got here")
 	return msg, nil
-}
-
-// A dummy server that waits for a message from the a client.
-func runDestination(ch chan<- testResult) {
-	l, err := net.Listen(network, dstAddr)
-	if err != nil {
-		ch <- testResult{err, []byte{}}
-		return
-	}
-	defer l.Close()
-
-	c, err := l.Accept()
-	if err != nil {
-		ch <- testResult{err, []byte{}}
-		return
-	}
-	defer c.Close()
-
-	buff := make([]byte, CellBytes*10)
-	bytes, err := c.Read(buff)
-	if err != nil {
-		ch <- testResult{err, []byte{}}
-		return
-	}
-
-	ch <- testResult{nil, buff[:bytes]}
-	return
 }
 
 // Test connection set up.
@@ -321,28 +291,44 @@ func TestRouterProxyRelay(t *testing.T) {
 	defer router.Close()
 	routerCh := make(chan testResult)
 	dstCh := make(chan testResult)
+
+	// Create a long message.
+	msg := make([]byte, (CellBytes*5)+237)
+	for i := 0; i < len(msg); i++ {
+		msg[i] = byte(i)
+	}
 	var res testResult
 
-	go runDummyServer(1, 1, dstCh, sender)
-	go runRouterHandleProxy(router, 2, routerCh)
-
-	msg, err := runProxyReceiveMessage(proxy)
-	if err != nil {
-		t.Errorf("<relay: %s", err)
+	trials := []int{
+		37,       // A short message
+		1024,     // A cell
+		len(msg), // A long message
 	}
 
-	res = <-routerCh
-	if res.err != nil {
-		t.Errorf("<relay: %s", res.err)
-	}
+	for _, l := range trials {
+		go runDummyServerWriteOne(msg[:l], dstCh)
+		go runRouterHandleProxy(router, 2, routerCh)
 
-	res = <-dstCh
-	if res.err != nil {
-		t.Errorf("<relay: %s", res.err)
-	}
-	t.Log(string(msg))
+		receivedMsg, err := runProxyReceiveMessage(proxy)
+		if err != nil {
+			t.Errorf("<relay (length=%d): %s", l, err)
+		}
 
-	// TODO(cjpatton) test a longer message.
+		res = <-routerCh
+		if res.err != nil {
+			t.Errorf("<relay (length=%d): %s", l, res.err)
+		}
+
+		res = <-dstCh
+		if res.err != nil {
+			t.Errorf("<relay (length=%d): %s", l, res.err)
+		}
+
+		if bytes.Compare(receivedMsg, msg[:l]) != 0 {
+			t.Errorf("<relay (length=%d): server got: %s", l, receivedMsg)
+		}
+
+	}
 }
 
 // Test sending malformed messages from the proxy to the router.

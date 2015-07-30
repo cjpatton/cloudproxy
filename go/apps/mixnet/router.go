@@ -157,10 +157,7 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 			bytes += copy(msg[bytes:], cell)
 		}
 
-		q := new(Queueable)
-		q.id = c.id
-		q.msg = msg
-		hp.nextQueue.Enqueue(q)
+		hp.nextQueue.EnqueueMsg(c.id, msg)
 
 	} else if cell[0] == dirCell { // Handle a directive.
 		dirBytes, n := binary.Uvarint(cell[1:])
@@ -180,40 +177,32 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 				return errors.New("multi-hop circuits not implemented")
 			}
 
-			q := new(Queueable)
-			q.id = c.id
-			q.addr = &d.Addrs[0]
-			hp.nextQueue.Enqueue(q)
-
+			hp.nextQueue.SetAddr(c.id, d.Addrs[0])
 			_, err = c.SendDirective(dirCreated)
 			return err
 
 		} else if *d.Type == DirectiveType_AWAIT_MSG {
 			// Wait for a message from the destination, divide it into cells,
 			// and add the cells to prevQueue.
-			q := new(Queueable)
-			q.id = c.id
-			q.reply = make(chan []byte)
-			hp.nextQueue.Enqueue(q)
+			reply := make(chan []byte)
+			hp.nextQueue.EnqueueReply(c.id, reply)
 
-			msg := <-q.reply
+			msg := <-reply
 			if msg != nil {
-				q.reply = nil
-				q.conn = c
-				q.addr = new(string)
-				*q.addr = c.RemoteAddr().String()
-				q.msg = make([]byte, CellBytes)
+				hp.prevQueue.SetConn(c.id, c)
+				hp.prevQueue.SetAddr(c.id, c.RemoteAddr().String())
+				cell := make([]byte, CellBytes)
 				msgBytes := len(msg)
 
-				q.msg[0] = msgCell
-				n := binary.PutUvarint(q.msg[1:], uint64(msgBytes))
-				bytes := copy(q.msg[1+n:], msg)
-				hp.prevQueue.Enqueue(q)
+				cell[0] = msgCell
+				n := binary.PutUvarint(cell[1:], uint64(msgBytes))
+				bytes := copy(cell[1+n:], msg)
+				hp.prevQueue.EnqueueMsg(c.id, cell)
 
 				for bytes < msgBytes {
 					zeroCell(cell)
-					bytes += copy(q.msg, msg[bytes:])
-					hp.prevQueue.Enqueue(q)
+					bytes += copy(cell, msg[bytes:])
+					hp.prevQueue.EnqueueMsg(c.id, cell)
 				}
 			}
 		}
