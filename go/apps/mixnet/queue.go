@@ -158,11 +158,11 @@ func (sq *Queue) DoQueue(kill <-chan bool) {
 
 				// Add message to send buffer.
 				buf.PushBack(q)
+			}
 
-				// Transmit the message batch if it is full.
-				if sq.ct >= sq.batchSize {
-					sq.dequeue()
-				}
+			// Transmit batches of messages.
+			for sq.ct >= sq.batchSize {
+				sq.dequeue()
 			}
 		}
 	}
@@ -261,7 +261,7 @@ func senderWorker(network, addr string, id uint64, q *Queueable, c net.Conn, def
 		if e != nil {
 			err <- sendQueueError{id, e}
 			res <- senderResult{nil, id}
-			q.reply <- []byte{}
+			q.reply <- nil
 			return
 		}
 
