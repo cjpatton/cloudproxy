@@ -130,31 +130,6 @@ func (c *Conn) ReceiveDirective(d *Directive) (int, error) {
 	return bytes, nil
 }
 
-// SendMessage divides a message into cells and sends each cell over the network
-// connection. directs the router to relay a message over the already constructed
-// circuit. A message is signaled to the reecevier by the first byte of the first
-// cell. The next few bytes encode the total number of bytes in the message.
-func (c *Conn) SendMessage(msg []byte) (int, error) {
-	msgBytes := len(msg)
-	cell := make([]byte, CellBytes)
-	cell[0] = msgCell
-	n := binary.PutUvarint(cell[1:], uint64(msgBytes))
-
-	bytes := copy(cell[1+n:], msg)
-	if _, err := c.Write(cell); err != nil {
-		return 0, err
-	}
-
-	for bytes < msgBytes {
-		zeroCell(cell)
-		bytes += copy(cell, msg[bytes:])
-		if _, err := c.Write(cell); err != nil {
-			return bytes, err
-		}
-	}
-	return bytes, nil
-}
-
 // Write zeros to each byte of a cell.
 func zeroCell(cell []byte) {
 	for i := 0; i < CellBytes; i++ {

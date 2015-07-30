@@ -149,7 +149,7 @@ func runProxySendMessage(proxy *ProxyContext, msg []byte) error {
 		return err
 	}
 
-	if _, err = c.SendMessage(msg); err != nil {
+	if err = proxy.SendMessage(c, msg); err != nil {
 		return err
 	}
 

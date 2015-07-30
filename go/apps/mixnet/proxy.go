@@ -71,7 +71,34 @@ func (p *ProxyContext) CreateCircuit(c *Conn, circuitAddrs []string) error {
 	return nil
 }
 
-// ReceiveMessage
+// SendMessage divides a message into cells and sends each cell over the network
+// connection. directs the router to relay a message over the already constructed
+// circuit. A message is signaled to the reecevier by the first byte of the first
+// cell. The next few bytes encode the total number of bytes in the message.
+func (p *ProxyContext) SendMessage(c *Conn, msg []byte) error {
+	msgBytes := len(msg)
+	cell := make([]byte, CellBytes)
+	cell[0] = msgCell
+	n := binary.PutUvarint(cell[1:], uint64(msgBytes))
+
+	bytes := copy(cell[1+n:], msg)
+	if _, err := c.Write(cell); err != nil {
+		return err
+	}
+
+	for bytes < msgBytes {
+		zeroCell(cell)
+		bytes += copy(cell, msg[bytes:])
+		if _, err := c.Write(cell); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ReceiveMessage directs the router to receive a message from the destination
+// over the mixnet. The router sends the message a cell at a time. These are
+// assembled and returned as a byte slice.
 func (p *ProxyContext) ReceiveMessage(c *Conn) ([]byte, error) {
 	var err error
 
