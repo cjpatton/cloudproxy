@@ -41,7 +41,7 @@ type RouterContext struct {
 	prevQueue *Queue
 
 	// The queues and error handlers are instantiated as go routines; these
-	// channels are for managing them.
+	// channels are for tearing them down.
 	killQueue             chan bool
 	killQueueErrorHandler chan bool
 

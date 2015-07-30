@@ -72,9 +72,9 @@ func (p *ProxyContext) CreateCircuit(c *Conn, circuitAddrs []string) error {
 }
 
 // SendMessage divides a message into cells and sends each cell over the network
-// connection. directs the router to relay a message over the already constructed
-// circuit. A message is signaled to the reecevier by the first byte of the first
-// cell. The next few bytes encode the total number of bytes in the message.
+// connection. A message is signaled to the reecevier by the first byte of the
+// first cell. The next few bytes encode the total number of bytes in the
+// message.
 func (p *ProxyContext) SendMessage(c *Conn, msg []byte) error {
 	msgBytes := len(msg)
 	cell := make([]byte, CellBytes)
@@ -135,6 +135,7 @@ func (p *ProxyContext) ReceiveMessage(c *Conn) ([]byte, error) {
 	return msg, nil
 }
 
+// Return the next serial identifier.
 func (p *ProxyContext) nextID() (id uint64) {
 	id = p.id
 	p.id++

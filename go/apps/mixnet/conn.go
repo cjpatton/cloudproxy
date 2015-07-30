@@ -48,7 +48,7 @@ var dirCreated = &Directive{Type: DirectiveType_CREATED.Enum()}
 var dirAwaitMsg = &Directive{Type: DirectiveType_AWAIT_MSG.Enum()}
 
 // Conn implements the net.Conn interface. The read and write operations are
-// overloaded to check that only cells are sent between agents in the mixnet
+// overloaded to check that only cells are sent between entities in the mixnet
 // protocol.
 type Conn struct {
 	net.Conn
@@ -80,7 +80,7 @@ func (c *Conn) Write(msg []byte) (n int, err error) {
 }
 
 // SendDirective serializes and pads a directive to the length of a cell and
-// sends it to the router. A directive is signaled to the receiver by the first
+// sends it to the peer. A directive is signaled to the receiver by the first
 // byte of the cell. The next few bytes encode the length of of the serialized
 // protocol buffer. If the buffer doesn't fit in a cell, then throw an error.
 func (c *Conn) SendDirective(d *Directive) (int, error) {
@@ -103,9 +103,9 @@ func (c *Conn) SendDirective(d *Directive) (int, error) {
 	return c.Write(cell)
 }
 
-// ReceiveDirective awaits a reply from the router and return the type of
-// directive received. This is in response to RouterContext.HandleProxy().
-// If the directive type is ERROR or FATAL, return an error.
+// ReceiveDirective awaits a reply from the peer and returns the directive
+// received, e.g. in response to RouterContext.HandleProxy(). If the directive
+// type is ERROR or FATAL, return an error.
 func (c *Conn) ReceiveDirective(d *Directive) (int, error) {
 	cell := make([]byte, CellBytes)
 	bytes, err := c.Read(cell)

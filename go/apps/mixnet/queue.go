@@ -69,11 +69,15 @@ func NewQueue(network string, batchSize int) (sq *Queue) {
 	return sq
 }
 
+// Enqueue inserts a queueable object into the queue. Note that this is
+// generally unsafe to use concurrently because it doesn't make a copy of the
+// data.
 func (sq *Queue) Enqueue(q *Queueable) {
 	sq.queue <- q
 }
 
-// EnqueueMsg
+// EnqueueMsg copies a byte slice into a queueable object and adds it to
+// the queue.
 func (sq *Queue) EnqueueMsg(id uint64, msg []byte) {
 	q := new(Queueable)
 	q.id = id
@@ -82,7 +86,8 @@ func (sq *Queue) EnqueueMsg(id uint64, msg []byte) {
 	sq.queue <- q
 }
 
-// EnqueueAddr
+// EnqueueReply creates a queuable object with a reply channel and adds it to
+// the queue.
 func (sq *Queue) EnqueueReply(id uint64, reply chan []byte) {
 	q := new(Queueable)
 	q.id = id
@@ -90,7 +95,8 @@ func (sq *Queue) EnqueueReply(id uint64, reply chan []byte) {
 	sq.queue <- q
 }
 
-// EnqueueAddr
+// SetAddr copies an address into a queuable object and adds it to the queue.
+// This sets the next-hop address for the id.
 func (sq *Queue) SetAddr(id uint64, addr string) {
 	q := new(Queueable)
 	q.id = id
@@ -99,7 +105,8 @@ func (sq *Queue) SetAddr(id uint64, addr string) {
 	sq.queue <- q
 }
 
-// EnqueueConn
+// SetConn creates a queueable object with a net.Conn interface and adds it to
+// the queue. This allows us to reuse an already created channel for replying.
 func (sq *Queue) SetConn(id uint64, c net.Conn) {
 	q := new(Queueable)
 	q.id = id
@@ -107,10 +114,11 @@ func (sq *Queue) SetConn(id uint64, c net.Conn) {
 	sq.queue <- q
 }
 
-// DoQueue adds messages to a queue and transmits messages in batches.
-// Typically a message is a cell, but when the calling router is an exit point,
-// the message length is arbitrary. A batch is transmitted when there are
-// messages on batchSize distinct sender channels.
+// DoQueue adds messages to a queue and transmits messages in batches. It also
+// provides an interface for receiving messages from a server. Typically a
+// message is a cell, but when the calling router is an exit point, the message
+// length is arbitrary. A batch is transmitted when there are messages on
+// batchSize distinct sender channels.
 func (sq *Queue) DoQueue(kill <-chan bool) {
 	for {
 		select {
@@ -136,6 +144,7 @@ func (sq *Queue) DoQueue(kill <-chan bool) {
 				sq.nextConn[q.id] = q.conn
 			}
 
+			// Add message or message request (reply) to the queue.
 			if q.msg != nil || q.reply != nil {
 
 				if _, def := sq.nextAddr[q.id]; !def {
@@ -169,7 +178,7 @@ func (sq *Queue) DoQueue(kill <-chan bool) {
 }
 
 // DoQueueErrorHandler handles errors produced by DoQueue. When this
-// is fully fleshed out, it will enqueue into the response queue a Directive
+// is fully fleshed out, it will enqueue into the prevQueue a Directive
 // containing an error message. For now, just print out the error.
 func (sq *Queue) DoQueueErrorHandler(kill <-chan bool) {
 	for {

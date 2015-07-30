@@ -20,7 +20,7 @@ enum DirectiveType {
   CREATE = 3;    // Create a circuit.
   CREATED = 4;   // Reply from router confirming the circuit was created.
   DESTROY = 5;   // Destroy a circuit.
-  AWAIT_MSG = 7; // Direct the router to wait for a message.
+  AWAIT_MSG = 7; // Direct an exit router to wait for a message.
 }
 
 message Directive {

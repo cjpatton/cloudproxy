@@ -20,15 +20,7 @@ import (
 	"testing"
 )
 
-type serverType int
-
-const (
-	sender serverType = iota
-	receiver
-)
-
-var sendTemplate = "You are client no. %d, this is msg. no. %d. "
-
+// A dummy server that sends a message to the connecting client.
 func runDummyServerWriteOne(msg []byte, ch chan<- testResult) {
 	l, err := net.Listen(network, dstAddr)
 	if err != nil {
@@ -48,6 +40,7 @@ func runDummyServerWriteOne(msg []byte, ch chan<- testResult) {
 	ch <- testResult{err, nil}
 }
 
+// A dummy sever that reads a message from the connecting client.
 func runDummyServerReadOne(ch chan<- testResult) {
 	l, err := net.Listen(network, dstAddr)
 	if err != nil {
@@ -72,9 +65,9 @@ func runDummyServerReadOne(ch chan<- testResult) {
 	ch <- testResult{nil, buf[:bytes]}
 }
 
-// A dummy server that accepts ct connections and waits for a message
+// A dummy server that accepts clientCt connections and waits for msgCt messages
 // from each client.
-func runDummyServer(clientCt, msgCt int, ch chan<- testResult, t serverType) {
+func runDummyServer(clientCt, msgCt int, ch chan<- testResult) {
 	l, err := net.Listen(network, dstAddr)
 	if err != nil {
 		ch <- testResult{err, []byte{}}
@@ -94,19 +87,11 @@ func runDummyServer(clientCt, msgCt int, ch chan<- testResult, t serverType) {
 			defer c.Close()
 			buff := make([]byte, CellBytes*10)
 			for j := 0; j < msgCt; j++ {
-				if t == receiver {
-					bytes, err := c.Read(buff)
-					if err != nil {
-						ch <- testResult{err, []byte{}}
-					} else {
-						ch <- testResult{nil, buff[:bytes]}
-					}
-				} else if t == sender {
-					if _, err := c.Write([]byte(fmt.Sprintf(sendTemplate, clientNo, j))); err != nil {
-						ch <- testResult{err, []byte{}}
-					} else {
-						ch <- testResult{nil, []byte{}}
-					}
+				bytes, err := c.Read(buff)
+				if err != nil {
+					ch <- testResult{err, []byte{}}
+				} else {
+					ch <- testResult{nil, buff[:bytes]}
 				}
 				done <- true
 			}
@@ -118,8 +103,7 @@ func runDummyServer(clientCt, msgCt int, ch chan<- testResult, t serverType) {
 	}
 }
 
-// Test Queue by enqueueing a bunch of messages and dequeueing them.
-// Test multiple rounds.
+// Test enqeueing a bunch of messages and dequeueing them.
 func TestQueueSend(t *testing.T) {
 
 	// batchSize must divide clientCt; otherwise the sendQueue will block forever.
@@ -132,7 +116,7 @@ func TestQueueSend(t *testing.T) {
 	done := make(chan bool)
 	dstCh := make(chan testResult)
 
-	go runDummyServer(clientCt, msgCt, dstCh, receiver)
+	go runDummyServer(clientCt, msgCt, dstCh)
 
 	go func() {
 		sq.DoQueue(kill)
@@ -174,16 +158,15 @@ func TestQueueSend(t *testing.T) {
 	<-done
 }
 
+// Test queuing a receive from the server.
 func TestQueueReceive(t *testing.T) {
-
-	msgCt := 1
 
 	sq := NewQueue(network, 1)
 	kill := make(chan bool)
 	done := make(chan bool)
 	dstCh := make(chan testResult)
 
-	go runDummyServer(1, msgCt, dstCh, sender)
+	go runDummyServerWriteOne([]byte("This is the end, my friend."), dstCh)
 
 	go func() {
 		sq.DoQueue(kill)

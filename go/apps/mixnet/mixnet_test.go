@@ -53,6 +53,8 @@ func makeContext(batchSize int) (*RouterContext, *ProxyContext, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	// CrateDomain() saves the configuration to disk; delete this now since
+	// we don't need it.
 	defer os.RemoveAll(configDir)
 
 	// Create a SoftTao from the domain.
@@ -154,6 +156,8 @@ func runProxySendMessage(proxy *ProxyContext, msg []byte) error {
 	return nil
 }
 
+// Proxy dials a router, creates a circuit, and receives a message over
+// the circuit.
 func runProxyReceiveMessage(proxy *ProxyContext) ([]byte, error) {
 	c, err := proxy.DialRouter(network, routerAddr)
 	if err != nil {
@@ -258,7 +262,7 @@ func TestProxyRouterRelay(t *testing.T) {
 		len(msg),  // A long message
 	}
 
-	go runDummyServer(len(trials), 1, dstCh, receiver)
+	go runDummyServer(len(trials), 1, dstCh)
 
 	for _, l := range trials {
 
