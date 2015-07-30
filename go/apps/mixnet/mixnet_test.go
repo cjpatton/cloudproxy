@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"crypto/x509/pkix"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -137,7 +138,7 @@ func runRouterHandleProxy(router *RouterContext, requestCount int, ch chan<- tes
 
 // Proxy dials a router, creates a circuit, and sends a message over
 // the circuit.
-func runProxyRelay(proxy *ProxyContext, msg []byte) error {
+func runProxySendMessage(proxy *ProxyContext, msg []byte) error {
 	c, err := proxy.DialRouter(network, routerAddr)
 	if err != nil {
 		return err
@@ -153,6 +154,32 @@ func runProxyRelay(proxy *ProxyContext, msg []byte) error {
 	}
 
 	return nil
+}
+
+func runProxyReceiveMessage(proxy *ProxyContext) ([]byte, error) {
+	c, err := proxy.DialRouter(network, routerAddr)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+
+	if _, err = proxy.CreateCircuit(c, []string{dstAddr}); err != nil {
+		return nil, err
+	}
+
+	if _, err = c.ReceiveDirective(); err != nil {
+		return nil, err
+	}
+
+	if _, err = c.SendDirective(dirAwaitMsg); err != nil {
+	}
+
+	msg, err := c.ReceiveMessage()
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println("got here")
+	return msg, nil
 }
 
 // A dummy server that waits for a message from the a client.
@@ -273,22 +300,56 @@ func TestProxyRouterRelay(t *testing.T) {
 	for _, l := range trials {
 
 		go runRouterHandleProxy(router, 2, routerCh)
-		if err = runProxyRelay(proxy, msg[:l]); err != nil {
-			t.Errorf("relay (length=%d): %s", l, err)
+		if err = runProxySendMessage(proxy, msg[:l]); err != nil {
+			t.Errorf(">relay (length=%d): %s", l, err)
 		}
 
 		res = <-routerCh
 		if res.err != nil {
-			t.Errorf("relay (length=%d): %s", l, res.err)
+			t.Errorf(">relay (length=%d): %s", l, res.err)
 		}
 
 		res = <-dstCh
 		if res.err != nil {
 			t.Error(res.err)
 		} else if bytes.Compare(res.msg, msg[:l]) != 0 {
-			t.Error("relay (length=%d): Server got: %s", l, res.msg)
+			t.Errorf(">relay (length=%d): Server got: %s", l, res.msg)
 		}
 	}
+}
+
+// Test setting up a circuit and waiting for a message from the
+// destination.
+func TestRouterProxyRelay(t *testing.T) {
+	router, proxy, err := makeContext(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer router.Close()
+	routerCh := make(chan testResult)
+	dstCh := make(chan testResult)
+	var res testResult
+
+	go runDummyServer(1, 1, dstCh, sender)
+	go runRouterHandleProxy(router, 2, routerCh)
+
+	msg, err := runProxyReceiveMessage(proxy)
+	if err != nil {
+		t.Errorf("<relay: %s", err)
+	}
+
+	res = <-routerCh
+	if res.err != nil {
+		t.Errorf("<relay: %s", res.err)
+	}
+
+	res = <-dstCh
+	if res.err != nil {
+		t.Errorf("<relay: %s", res.err)
+	}
+	t.Log(string(msg))
+
+	// TODO(cjpatton) test a longer message.
 }
 
 // Test sending malformed messages from the proxy to the router.

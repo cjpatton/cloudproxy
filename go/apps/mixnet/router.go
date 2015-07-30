@@ -132,7 +132,9 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 		return err
 	}
 
-	if cell[0] == msgCell { // Handle a message.
+	if cell[0] == msgCell {
+		// Read a message from a sender one cell at a time, assemble it into
+		// a message, and add it to nextQueue.
 		msgBytes, n := binary.Uvarint(cell[1:])
 		if msgBytes > MaxMsgBytes {
 			if _, err = hp.SendFatal(c, errMsgLength); err != nil {
@@ -168,8 +170,9 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 		}
 
 		if *d.Type == DirectiveType_CREATE {
-			// Construct a circuit and send a CREATED directive to sender to
-			// confirm. For now, only single hop circuits are supported.
+			// Add next hop for this circuit to nextQueue and send a CREATED
+			// directive to sender to inform the sender. For now, only single
+			// hop circuits are supported.
 			if len(d.Addrs) == 0 {
 				return errBadDirective
 			}
@@ -187,7 +190,7 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 
 		} else if *d.Type == DirectiveType_AWAIT_MSG {
 			// Wait for a message from the destination, divide it into cells,
-			// and reply to sender.
+			// and add the cells to prevQueue.
 			q := new(Queueable)
 			q.id = c.id
 			q.reply = make(chan []byte)
@@ -195,7 +198,23 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 
 			msg := <-q.reply
 			if msg != nil {
-				// TODO(cjpatton) add cells to prevQueue.
+				q.reply = nil
+				q.conn = c
+				q.addr = new(string)
+				*q.addr = c.RemoteAddr().String()
+				q.msg = make([]byte, CellBytes)
+				msgBytes := len(msg)
+
+				q.msg[0] = msgCell
+				n := binary.PutUvarint(q.msg[1:], uint64(msgBytes))
+				bytes := copy(q.msg[1+n:], msg)
+				hp.prevQueue.Enqueue(q)
+
+				for bytes < msgBytes {
+					zeroCell(cell)
+					bytes += copy(q.msg, msg[bytes:])
+					hp.prevQueue.Enqueue(q)
+				}
 			}
 		}
 

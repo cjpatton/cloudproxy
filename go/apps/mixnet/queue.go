@@ -27,6 +27,7 @@ type Queueable struct {
 	id    uint64
 	addr  *string
 	msg   []byte
+	conn  net.Conn
 	reply chan []byte
 }
 
@@ -94,6 +95,13 @@ func (sq *Queue) DoQueue(kill <-chan bool) {
 			// stale connections on routers.
 			if _, def := sq.nextAddr[q.id]; !def && q.addr != nil {
 				sq.nextAddr[q.id] = *q.addr
+			}
+
+			// Set the next-hop connection. This is useful for routing replies
+			// from the destination over already created circuits back to the
+			// source.
+			if _, def := sq.nextConn[q.id]; !def && q.conn != nil {
+				sq.nextConn[q.id] = q.conn
 			}
 
 			if _, def := sq.nextAddr[q.id]; !def {

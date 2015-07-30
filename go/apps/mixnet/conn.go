@@ -39,11 +39,13 @@ const (
 )
 
 var errCellLength = errors.New("incorrect cell length")
+var errCellType = errors.New("incorrect cell type")
 var errBadCellType = errors.New("unrecognized cell type")
 var errBadDirective = errors.New("received bad directive")
 var errMsgLength = errors.New("message too long")
 
 var dirCreated = &Directive{Type: DirectiveType_CREATED.Enum()}
+var dirAwaitMsg = &Directive{Type: DirectiveType_AWAIT_MSG.Enum()}
 
 // Conn implements the net.Conn interface. The read and write operations are
 // overloaded to check that only cells are sent between agents in the mixnet
@@ -152,6 +154,36 @@ func (c *Conn) SendMessage(msg []byte) (int, error) {
 		}
 	}
 	return bytes, nil
+}
+
+// ReceiveMessage
+func (c *Conn) ReceiveMessage() ([]byte, error) {
+	var err error
+	cell := make([]byte, CellBytes)
+	if _, err = c.Read(cell); err != nil && err != io.EOF {
+		return nil, err
+	}
+
+	if cell[0] != msgCell {
+		return nil, errCellType
+	}
+
+	msgBytes, n := binary.Uvarint(cell[1:])
+	if msgBytes > MaxMsgBytes {
+		return nil, errMsgLength
+	}
+
+	msg := make([]byte, msgBytes)
+	bytes := copy(msg, cell[1+n:])
+
+	for err != io.EOF && uint64(bytes) < msgBytes {
+		if _, err = c.Read(cell); err != nil && err != io.EOF {
+			return nil, err
+		}
+		bytes += copy(msg[bytes:], cell)
+	}
+
+	return msg, nil
 }
 
 // Write zeros to each byte of a cell.
