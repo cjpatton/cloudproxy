@@ -347,7 +347,7 @@ func TestMaliciousProxyRouterRelay(t *testing.T) {
 	cell := make([]byte, CellBytes)
 
 	// Unrecognized cell type.
-	cell[0] = dirCell ^ msgCell ^ relayCell
+	cell[0] = 0xff
 	go runRouterHandleProxy(router, 1, ch)
 	c, err := proxy.DialRouter(network, routerAddr)
 	if err != nil {

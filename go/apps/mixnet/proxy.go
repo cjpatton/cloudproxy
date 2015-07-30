@@ -88,7 +88,8 @@ func (p *ProxyContext) SendMessage(c *Conn, msg []byte) error {
 
 	for bytes < msgBytes {
 		zeroCell(cell)
-		bytes += copy(cell, msg[bytes:])
+		cell[0] = msgCell
+		bytes += copy(cell[1:], msg[bytes:])
 		if _, err := c.Write(cell); err != nil {
 			return err
 		}
@@ -129,7 +130,10 @@ func (p *ProxyContext) ReceiveMessage(c *Conn) ([]byte, error) {
 		if _, err = c.Read(cell); err != nil && err != io.EOF {
 			return nil, err
 		}
-		bytes += copy(msg[bytes:], cell)
+		if cell[0] != msgCell {
+			return nil, errCellType
+		}
+		bytes += copy(msg[bytes:], cell[1:])
 	}
 
 	return msg, nil

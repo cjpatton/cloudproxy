@@ -35,7 +35,6 @@ const (
 const (
 	msgCell = iota
 	dirCell
-	relayCell
 )
 
 var errCellLength = errors.New("incorrect cell length")

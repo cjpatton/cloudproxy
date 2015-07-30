@@ -133,8 +133,10 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 	}
 
 	if cell[0] == msgCell {
-		// Read a message from a sender one cell at a time, assemble it into
-		// a message, and add it to nextQueue.
+		// If this router is an exit point, then read cells until the whole
+		// message is assembled and add it to nextQueue. If this router is
+		// a relay (not implemented), then just add the cell to the
+		// nextQueue.
 		msgBytes, n := binary.Uvarint(cell[1:])
 		if msgBytes > MaxMsgBytes {
 			if _, err = hp.SendFatal(c, errMsgLength); err != nil {
@@ -153,10 +155,11 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 		for err != io.EOF && uint64(bytes) < msgBytes {
 			if _, err = c.Read(cell); err != nil && err != io.EOF {
 				return err
+			} else if cell[0] != msgCell {
+				return errCellType
 			}
-			bytes += copy(msg[bytes:], cell)
+			bytes += copy(msg[bytes:], cell[1:])
 		}
-
 		hp.nextQueue.EnqueueMsg(c.id, msg)
 
 	} else if cell[0] == dirCell { // Handle a directive.
@@ -201,7 +204,8 @@ func (hp *RouterContext) HandleProxy(c *Conn) error {
 
 				for bytes < msgBytes {
 					zeroCell(cell)
-					bytes += copy(cell, msg[bytes:])
+					cell[0] = msgCell
+					bytes += copy(cell[1:], msg[bytes:])
 					hp.prevQueue.EnqueueMsg(c.id, cell)
 				}
 			}
