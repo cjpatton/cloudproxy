@@ -145,7 +145,7 @@ func runProxySendMessage(proxy *ProxyContext, msg []byte) error {
 	}
 	defer c.Close()
 
-	if _, err = proxy.CreateCircuit(c, []string{dstAddr}); err != nil {
+	if err = proxy.CreateCircuit(c, []string{dstAddr}); err != nil {
 		return err
 	}
 
@@ -163,18 +163,11 @@ func runProxyReceiveMessage(proxy *ProxyContext) ([]byte, error) {
 	}
 	defer c.Close()
 
-	if _, err = proxy.CreateCircuit(c, []string{dstAddr}); err != nil {
+	if err = proxy.CreateCircuit(c, []string{dstAddr}); err != nil {
 		return nil, err
 	}
 
-	if _, err = c.ReceiveDirective(); err != nil {
-		return nil, err
-	}
-
-	if _, err = c.SendDirective(dirAwaitMsg); err != nil {
-	}
-
-	msg, err := c.ReceiveMessage()
+	msg, err := proxy.ReceiveMessage(c)
 	if err != nil {
 		return nil, err
 	}
@@ -373,7 +366,8 @@ func TestMaliciousProxyRouterRelay(t *testing.T) {
 	if _, err = c.Write(cell); err != nil {
 		t.Error(err)
 	}
-	_, err = c.ReceiveDirective()
+	var d Directive
+	_, err = c.ReceiveDirective(&d)
 	if err == nil || err.Error() != "router error: "+errBadCellType.Error() {
 		t.Error("Bad cell, got incorrect error: ", err)
 	}
@@ -391,7 +385,7 @@ func TestMaliciousProxyRouterRelay(t *testing.T) {
 	if _, err = c.Write(cell); err != nil {
 		t.Error(err)
 	}
-	_, err = c.ReceiveDirective()
+	_, err = c.ReceiveDirective(&d)
 	if err == nil || err.Error() != "router error: "+errMsgLength.Error()+" (connection closed)" {
 		t.Error("Long message, got incorrect error: ", err)
 	}

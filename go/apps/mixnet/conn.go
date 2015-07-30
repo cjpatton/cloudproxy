@@ -106,29 +106,28 @@ func (c *Conn) SendDirective(d *Directive) (int, error) {
 // ReceiveDirective awaits a reply from the router and return the type of
 // directive received. This is in response to RouterContext.HandleProxy().
 // If the directive type is ERROR or FATAL, return an error.
-func (c *Conn) ReceiveDirective() (*Directive, error) {
-	var err error
+func (c *Conn) ReceiveDirective(d *Directive) (int, error) {
 	cell := make([]byte, CellBytes)
-	if _, err = c.Read(cell); err != nil && err != io.EOF {
-		return nil, err
+	bytes, err := c.Read(cell)
+	if err != nil && err != io.EOF {
+		return 0, err
 	}
 
 	if cell[0] != dirCell {
-		return nil, errBadCellType
+		return bytes, errBadCellType
 	}
 
 	dirBytes, n := binary.Uvarint(cell[1:])
-	d := new(Directive)
 	if err := proto.Unmarshal(cell[1+n:1+n+int(dirBytes)], d); err != nil {
-		return nil, err
+		return bytes, err
 	}
 
 	if *d.Type == DirectiveType_ERROR {
-		return nil, errors.New("router error: " + (*d.Error))
+		return bytes, errors.New("router error: " + (*d.Error))
 	} else if *d.Type == DirectiveType_FATAL {
-		return nil, errors.New("router error: " + (*d.Error) + " (connection closed)")
+		return bytes, errors.New("router error: " + (*d.Error) + " (connection closed)")
 	}
-	return d, nil
+	return bytes, nil
 }
 
 // SendMessage divides a message into cells and sends each cell over the network
@@ -154,36 +153,6 @@ func (c *Conn) SendMessage(msg []byte) (int, error) {
 		}
 	}
 	return bytes, nil
-}
-
-// ReceiveMessage
-func (c *Conn) ReceiveMessage() ([]byte, error) {
-	var err error
-	cell := make([]byte, CellBytes)
-	if _, err = c.Read(cell); err != nil && err != io.EOF {
-		return nil, err
-	}
-
-	if cell[0] != msgCell {
-		return nil, errCellType
-	}
-
-	msgBytes, n := binary.Uvarint(cell[1:])
-	if msgBytes > MaxMsgBytes {
-		return nil, errMsgLength
-	}
-
-	msg := make([]byte, msgBytes)
-	bytes := copy(msg, cell[1+n:])
-
-	for err != io.EOF && uint64(bytes) < msgBytes {
-		if _, err = c.Read(cell); err != nil && err != io.EOF {
-			return nil, err
-		}
-		bytes += copy(msg[bytes:], cell)
-	}
-
-	return msg, nil
 }
 
 // Write zeros to each byte of a cell.

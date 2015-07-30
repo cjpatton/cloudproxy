@@ -15,6 +15,10 @@
 package mixnet
 
 import (
+	"encoding/binary"
+	"errors"
+	"io"
+
 	"github.com/jlmucb/cloudproxy/go/tao"
 )
 
@@ -48,11 +52,60 @@ func (p *ProxyContext) DialRouter(network, addr string) (*Conn, error) {
 
 // CreateCircuit directs the router to construct a circuit to a particular
 // destination over the mixnet.
-func (p *ProxyContext) CreateCircuit(c *Conn, circuitAddrs []string) (int, error) {
+func (p *ProxyContext) CreateCircuit(c *Conn, circuitAddrs []string) error {
 	var d Directive
 	d.Type = DirectiveType_CREATE.Enum()
 	d.Addrs = circuitAddrs
-	return c.SendDirective(&d)
+
+	// Send CREATE directive to router.
+	if _, err := c.SendDirective(&d); err != nil {
+		return err
+	}
+
+	// Wait for CREATED directive from router.
+	if _, err := c.ReceiveDirective(&d); err != nil {
+		return err
+	} else if *d.Type != DirectiveType_CREATED {
+		return errors.New("could not create circuit")
+	}
+	return nil
+}
+
+// ReceiveMessage
+func (p *ProxyContext) ReceiveMessage(c *Conn) ([]byte, error) {
+	var err error
+
+	// Send AWAIT_MSG directive to router.
+	if _, err = c.SendDirective(dirAwaitMsg); err != nil {
+		return nil, err
+	}
+
+	// Receive cells from router.
+	cell := make([]byte, CellBytes)
+	if _, err = c.Read(cell); err != nil && err != io.EOF {
+		return nil, err
+	}
+
+	if cell[0] != msgCell {
+		return nil, errCellType
+	}
+
+	msgBytes, n := binary.Uvarint(cell[1:])
+	if msgBytes > MaxMsgBytes {
+		return nil, errMsgLength
+	}
+
+	msg := make([]byte, msgBytes)
+	bytes := copy(msg, cell[1+n:])
+
+	for err != io.EOF && uint64(bytes) < msgBytes {
+		if _, err = c.Read(cell); err != nil && err != io.EOF {
+			return nil, err
+		}
+		bytes += copy(msg[bytes:], cell)
+	}
+
+	return msg, nil
 }
 
 func (p *ProxyContext) nextID() (id uint64) {
