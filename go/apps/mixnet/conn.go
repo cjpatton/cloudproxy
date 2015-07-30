@@ -17,6 +17,7 @@ package mixnet
 import (
 	"encoding/binary"
 	"errors"
+	"io"
 	"net"
 
 	"github.com/golang/protobuf/proto"
@@ -34,16 +35,19 @@ const (
 const (
 	msgCell = iota
 	dirCell
-	relayCell
 )
 
 var errCellLength = errors.New("incorrect cell length")
+var errCellType = errors.New("incorrect cell type")
 var errBadCellType = errors.New("unrecognized cell type")
 var errBadDirective = errors.New("received bad directive")
 var errMsgLength = errors.New("message too long")
 
+var dirCreated = &Directive{Type: DirectiveType_CREATED.Enum()}
+var dirAwaitMsg = &Directive{Type: DirectiveType_AWAIT_MSG.Enum()}
+
 // Conn implements the net.Conn interface. The read and write operations are
-// overloaded to check that only cells are sent between agents in the mixnet
+// overloaded to check that only cells are sent between entities in the mixnet
 // protocol.
 type Conn struct {
 	net.Conn
@@ -75,10 +79,10 @@ func (c *Conn) Write(msg []byte) (n int, err error) {
 }
 
 // SendDirective serializes and pads a directive to the length of a cell and
-// sends it to the router. A directive is signaled to the receiver by the first
-// byte of the cell. The next 8 bytes encodes the length of of the serialized
+// sends it to the peer. A directive is signaled to the receiver by the first
+// byte of the cell. The next few bytes encode the length of of the serialized
 // protocol buffer. If the buffer doesn't fit in a cell, then throw an error.
-func SendDirective(c net.Conn, d *Directive) (int, error) {
+func (c *Conn) SendDirective(d *Directive) (int, error) {
 	db, err := proto.Marshal(d)
 	if err != nil {
 		return 0, err
@@ -96,6 +100,33 @@ func SendDirective(c net.Conn, d *Directive) (int, error) {
 	copy(cell[1+n:], db)
 
 	return c.Write(cell)
+}
+
+// ReceiveDirective awaits a reply from the peer and returns the directive
+// received, e.g. in response to RouterContext.HandleProxy(). If the directive
+// type is ERROR or FATAL, return an error.
+func (c *Conn) ReceiveDirective(d *Directive) (int, error) {
+	cell := make([]byte, CellBytes)
+	bytes, err := c.Read(cell)
+	if err != nil && err != io.EOF {
+		return 0, err
+	}
+
+	if cell[0] != dirCell {
+		return bytes, errCellType
+	}
+
+	dirBytes, n := binary.Uvarint(cell[1:])
+	if err := proto.Unmarshal(cell[1+n:1+n+int(dirBytes)], d); err != nil {
+		return bytes, err
+	}
+
+	if *d.Type == DirectiveType_ERROR {
+		return bytes, errors.New("router error: " + (*d.Error))
+	} else if *d.Type == DirectiveType_FATAL {
+		return bytes, errors.New("router error: " + (*d.Error) + " (connection closed)")
+	}
+	return bytes, nil
 }
 
 // Write zeros to each byte of a cell.

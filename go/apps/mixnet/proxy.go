@@ -18,9 +18,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"net"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/jlmucb/cloudproxy/go/tao"
 )
 
@@ -54,17 +52,30 @@ func (p *ProxyContext) DialRouter(network, addr string) (*Conn, error) {
 
 // CreateCircuit directs the router to construct a circuit to a particular
 // destination over the mixnet.
-func (p *ProxyContext) CreateCircuit(c net.Conn, circuitAddrs []string) (int, error) {
+func (p *ProxyContext) CreateCircuit(c *Conn, circuitAddrs []string) error {
 	var d Directive
-	d.Type = DirectiveType_CREATE_CIRCUIT.Enum()
+	d.Type = DirectiveType_CREATE.Enum()
 	d.Addrs = circuitAddrs
-	return SendDirective(c, &d)
+
+	// Send CREATE directive to router.
+	if _, err := c.SendDirective(&d); err != nil {
+		return err
+	}
+
+	// Wait for CREATED directive from router.
+	if _, err := c.ReceiveDirective(&d); err != nil {
+		return err
+	} else if *d.Type != DirectiveType_CREATED {
+		return errors.New("could not create circuit")
+	}
+	return nil
 }
 
-// SendMessage directs the router to relay a message over the already constructed
-// circuit. A message is signaled to the reecevier by the first byte of the first
-// cell. The next 8 bytes encode the total number of bytes in the message.
-func (p *ProxyContext) SendMessage(c net.Conn, msg []byte) (int, error) {
+// SendMessage divides a message into cells and sends each cell over the network
+// connection. A message is signaled to the reecevier by the first byte of the
+// first cell. The next few bytes encode the total number of bytes in the
+// message.
+func (p *ProxyContext) SendMessage(c *Conn, msg []byte) error {
 	msgBytes := len(msg)
 	cell := make([]byte, CellBytes)
 	cell[0] = msgCell
@@ -72,51 +83,63 @@ func (p *ProxyContext) SendMessage(c net.Conn, msg []byte) (int, error) {
 
 	bytes := copy(cell[1+n:], msg)
 	if _, err := c.Write(cell); err != nil {
-		return 0, err
+		return err
 	}
 
 	for bytes < msgBytes {
 		zeroCell(cell)
-		bytes += copy(cell, msg[bytes:])
+		cell[0] = msgCell
+		bytes += copy(cell[1:], msg[bytes:])
 		if _, err := c.Write(cell); err != nil {
-			return bytes, err
+			return err
 		}
 	}
-
-	return bytes, nil
+	return nil
 }
 
-// ReceiveMessage waits for a reply or error message from the router.
-func (p *ProxyContext) ReceiveMessage(c net.Conn, msg []byte) (int, error) {
+// ReceiveMessage directs the router to receive a message from the destination
+// over the mixnet. The router sends the message a cell at a time. These are
+// assembled and returned as a byte slice.
+func (p *ProxyContext) ReceiveMessage(c *Conn) ([]byte, error) {
 	var err error
+
+	// Send AWAIT_MSG directive to router.
+	if _, err = c.SendDirective(dirAwaitMsg); err != nil {
+		return nil, err
+	}
+
+	// Receive cells from router.
 	cell := make([]byte, CellBytes)
 	if _, err = c.Read(cell); err != nil && err != io.EOF {
-		return 0, err
+		return nil, err
 	}
 
-	if cell[0] == msgCell { // Read a message.
-		// TODO(cjpatton)
-
-	} else if cell[0] == dirCell { // Handle a directive.
-		dirBytes, n := binary.Uvarint(cell[1:])
-		var d Directive
-		if err := proto.Unmarshal(cell[1+n:1+n+int(dirBytes)], &d); err != nil {
-			return 0, err
-		}
-
-		switch *d.Type {
-		case DirectiveType_ERROR:
-			return 0, errors.New("router error: " + (*d.Error))
-		case DirectiveType_FATAL:
-			return 0, errors.New("router error: " + (*d.Error) + " (connection closed)")
-		default:
-			return 0, errBadDirective
-		}
+	if cell[0] != msgCell {
+		return nil, errCellType
 	}
 
-	return 0, errBadCellType
+	msgBytes, n := binary.Uvarint(cell[1:])
+	if msgBytes > MaxMsgBytes {
+		return nil, errMsgLength
+	}
+
+	msg := make([]byte, msgBytes)
+	bytes := copy(msg, cell[1+n:])
+
+	for err != io.EOF && uint64(bytes) < msgBytes {
+		if _, err = c.Read(cell); err != nil && err != io.EOF {
+			return nil, err
+		}
+		if cell[0] != msgCell {
+			return nil, errCellType
+		}
+		bytes += copy(msg[bytes:], cell[1:])
+	}
+
+	return msg, nil
 }
 
+// Return the next serial identifier.
 func (p *ProxyContext) nextID() (id uint64) {
 	id = p.id
 	p.id++

@@ -18,11 +18,54 @@ import (
 	"fmt"
 	"net"
 	"testing"
-
-	"github.com/golang/protobuf/proto"
 )
 
-// A dummy server that accepts ct connections and waits for a message
+// A dummy server that sends a message to the connecting client.
+func runDummyServerWriteOne(msg []byte, ch chan<- testResult) {
+	l, err := net.Listen(network, dstAddr)
+	if err != nil {
+		ch <- testResult{err, []byte{}}
+		return
+	}
+	defer l.Close()
+
+	c, err := l.Accept()
+	if err != nil {
+		ch <- testResult{err, []byte{}}
+		return
+	}
+	defer c.Close()
+
+	_, err = c.Write(msg)
+	ch <- testResult{err, nil}
+}
+
+// A dummy sever that reads a message from the connecting client.
+func runDummyServerReadOne(ch chan<- testResult) {
+	l, err := net.Listen(network, dstAddr)
+	if err != nil {
+		ch <- testResult{err, []byte{}}
+		return
+	}
+	defer l.Close()
+
+	c, err := l.Accept()
+	if err != nil {
+		ch <- testResult{err, []byte{}}
+		return
+	}
+	defer c.Close()
+
+	buf := make([]byte, CellBytes*10)
+	bytes, err := c.Read(buf)
+	if err != nil {
+		ch <- testResult{err, nil}
+		return
+	}
+	ch <- testResult{nil, buf[:bytes]}
+}
+
+// A dummy server that accepts clientCt connections and waits for msgCt messages
 // from each client.
 func runDummyServer(clientCt, msgCt int, ch chan<- testResult) {
 	l, err := net.Listen(network, dstAddr)
@@ -40,19 +83,19 @@ func runDummyServer(clientCt, msgCt int, ch chan<- testResult) {
 			return
 		}
 
-		go func(c net.Conn) {
+		go func(c net.Conn, clientNo int) {
 			defer c.Close()
 			buff := make([]byte, CellBytes*10)
 			for j := 0; j < msgCt; j++ {
 				bytes, err := c.Read(buff)
 				if err != nil {
 					ch <- testResult{err, []byte{}}
-					done <- true
+				} else {
+					ch <- testResult{nil, buff[:bytes]}
 				}
-				ch <- testResult{nil, buff[:bytes]}
 				done <- true
 			}
-		}(c)
+		}(c, i)
 	}
 
 	for i := 0; i < clientCt*msgCt; i++ {
@@ -60,16 +103,15 @@ func runDummyServer(clientCt, msgCt int, ch chan<- testResult) {
 	}
 }
 
-// Test SendQueue by enqueueing a bunch of messages and dequeueing them.
-// Test multiple rounds.
-func TestSendQueue(t *testing.T) {
+// Test enqeueing a bunch of messages and dequeueing them.
+func TestQueueSend(t *testing.T) {
 
 	// batchSize must divide clientCt; otherwise the sendQueue will block forever.
 	batchSize := 2
 	clientCt := 4
 	msgCt := 3
 
-	sq := NewSendQueue(network, batchSize)
+	sq := NewQueue(network, batchSize)
 	kill := make(chan bool)
 	done := make(chan bool)
 	dstCh := make(chan testResult)
@@ -77,12 +119,12 @@ func TestSendQueue(t *testing.T) {
 	go runDummyServer(clientCt, msgCt, dstCh)
 
 	go func() {
-		sq.DoSendQueue(kill)
+		sq.DoQueue(kill)
 		done <- true
 	}()
 
 	go func() {
-		sq.DoSendQueueErrorHandler(kill)
+		sq.DoQueueErrorHandler(kill)
 		done <- true
 	}()
 
@@ -90,9 +132,9 @@ func TestSendQueue(t *testing.T) {
 		// Enqueue some messages.
 		for i := 0; i < clientCt; i++ {
 			q := new(Queueable)
-			q.Id = proto.Uint64(uint64(i))
-			q.Addr = proto.String(dstAddr)
-			q.Msg = []byte(
+			q.id = uint64(i)
+			q.addr = &dstAddr
+			q.msg = []byte(
 				fmt.Sprintf("I am anonymous, but my ID is %d.", i))
 			sq.Enqueue(q)
 		}
@@ -107,6 +149,46 @@ func TestSendQueue(t *testing.T) {
 				t.Log(string(res.msg))
 			}
 		}
+	}
+
+	kill <- true
+	kill <- true
+
+	<-done
+	<-done
+}
+
+// Test queuing a receive from the server.
+func TestQueueReceive(t *testing.T) {
+
+	sq := NewQueue(network, 1)
+	kill := make(chan bool)
+	done := make(chan bool)
+	dstCh := make(chan testResult)
+
+	go runDummyServerWriteOne([]byte("This is the end, my friend."), dstCh)
+
+	go func() {
+		sq.DoQueue(kill)
+		done <- true
+	}()
+
+	go func() {
+		sq.DoQueueErrorHandler(kill)
+		done <- true
+	}()
+
+	q := new(Queueable)
+	q.id = 99
+	q.addr = &dstAddr
+	q.reply = make(chan []byte)
+	sq.Enqueue(q)
+
+	res := <-dstCh
+	if res.err != nil {
+		t.Error(res.err)
+	} else {
+		t.Log(string(<-q.reply))
 	}
 
 	kill <- true
