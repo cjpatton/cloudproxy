@@ -28,8 +28,10 @@ import (
 	"github.com/jlmucb/cloudproxy/go/tao"
 )
 
-// Run mixnet router service for mixnet proxies.
-func serveMixnetClients(hp *mixnet.RouterContext) error {
+// Run mixnet router service for mixnet proxies. The proxy dials the
+// Tao-delegated router anonymously, sends a message, and waits for a
+// respsone.
+func serveMixnetProxies(hp *mixnet.RouterContext) error {
 	for {
 		c, err := hp.AcceptProxy()
 		if err != nil {
@@ -87,7 +89,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	if err = serveMixnetClients(hp); err != nil {
+	if err = serveMixnetProxies(hp); err != nil {
 		glog.Errorf("error while serving: %s", err)
 	}
 
