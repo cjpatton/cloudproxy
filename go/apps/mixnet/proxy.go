@@ -18,6 +18,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"time"
 
 	"github.com/jlmucb/cloudproxy/go/tao"
 )
@@ -28,13 +29,15 @@ type ProxyContext struct {
 	domain *tao.Domain // Policy guard and public key.
 	id     uint64      // Next serial identifier that will assigned to a new connection.
 
-	network string // Network protocol, e.g. "tcp".
+	network string        // Network protocol, e.g. "tcp".
+	timeout time.Duration // Timeout on read.
 }
 
 // NewProxyContext loads a domain from a local configuration.
-func NewProxyContext(path, network string) (p *ProxyContext, err error) {
+func NewProxyContext(path, network string, timeout time.Duration) (p *ProxyContext, err error) {
 	p = new(ProxyContext)
 	p.network = network
+	p.timeout = timeout
 
 	// Load domain from a local configuration.
 	if p.domain, err = tao.LoadDomain(path, nil); err != nil {
@@ -106,6 +109,7 @@ func (p *ProxyContext) CreateCircuit(addrs ...string) (*Conn, error) {
 	}
 
 	// Wait for CREATED directive from router.
+	c.SetReadDeadline(time.Now().Add(p.timeout))
 	if _, err := p.ReceiveDirective(c, d); err != nil {
 		return c, err
 	} else if *d.Type != DirectiveType_CREATED {
@@ -161,6 +165,7 @@ func (p *ProxyContext) ReceiveMessage(c *Conn) ([]byte, error) {
 
 	// Receive cells from router.
 	cell := make([]byte, CellBytes)
+	c.SetReadDeadline(time.Now().Add(p.timeout))
 	if _, err = c.Read(cell); err != nil && err != io.EOF {
 		return nil, err
 	}
@@ -187,6 +192,7 @@ func (p *ProxyContext) ReceiveMessage(c *Conn) ([]byte, error) {
 	bytes := copy(msg, cell[1+n:])
 
 	for err != io.EOF && uint64(bytes) < msgBytes {
+		c.SetReadDeadline(time.Now().Add(p.timeout))
 		if _, err = c.Read(cell); err != nil && err != io.EOF {
 			return nil, err
 		}

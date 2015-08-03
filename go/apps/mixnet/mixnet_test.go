@@ -47,7 +47,7 @@ func makeTrivialDomain(configDir string) (*tao.Domain, error) {
 
 func makeContext(batchSize int) (*RouterContext, *ProxyContext, error) {
 
-	timeout, _ := time.ParseDuration("5s")
+	timeout, _ := time.ParseDuration("1s")
 	configDir := "/tmp/mixnet_test_domain"
 	configPath := path.Join(configDir, "tao.config")
 
@@ -75,7 +75,7 @@ func makeContext(batchSize int) (*RouterContext, *ProxyContext, error) {
 	}
 
 	// Create a proxy context. This just loads the domain.
-	proxy, err := NewProxyContext(configPath, network)
+	proxy, err := NewProxyContext(configPath, network, timeout)
 	if err != nil {
 		router.Close()
 		return nil, nil, err
@@ -122,7 +122,7 @@ func runProxyWriteCell(proxy *ProxyContext, msg []byte) error {
 
 // Router accepts a connection from a proxy and handles a number of
 // requests.
-func runRouterHandleProxy(router *RouterContext, requestCount int, ch chan<- testResult) {
+func runRouterHandleOneProxy(router *RouterContext, requestCount int, ch chan<- testResult) {
 	c, err := router.AcceptProxy()
 	if err != nil {
 		ch <- testResult{err, []byte{}}
@@ -138,6 +138,23 @@ func runRouterHandleProxy(router *RouterContext, requestCount int, ch chan<- tes
 	}
 
 	ch <- testResult{nil, nil}
+}
+
+func runRouterHandleProxy(router *RouterContext, clientCt, requestCt int, ch chan<- error) {
+	for i := 0; i < clientCt; i++ {
+		c, err := router.AcceptProxy()
+		if err != nil {
+			for j := 0; j < requestCt; j++ {
+				ch <- err
+			}
+		}
+		go func(c *Conn) {
+			defer c.Close()
+			for j := 0; j < requestCt; j++ {
+				ch <- router.HandleProxy(c)
+			}
+		}(c)
+	}
 }
 
 // Proxy dials a router, creates a circuit, and sends a message over
@@ -184,8 +201,6 @@ func TestProxyRouterConnect(t *testing.T) {
 }
 
 // Test CREATE and DESTROY.
-// TODO(cjpatton) try changing the batchSize to 2 and SendMessage to see
-// what happens when the circuit is torn down with messages on the queue.
 func TestCreateDestroy(t *testing.T) {
 	router, proxy, err := makeContext(1)
 	if err != nil {
@@ -194,10 +209,14 @@ func TestCreateDestroy(t *testing.T) {
 	defer router.Close()
 
 	ch := make(chan testResult)
-	go runRouterHandleProxy(router, 2, ch)
+	go runRouterHandleOneProxy(router, 3, ch)
 
 	c, err := proxy.CreateCircuit(routerAddr, dstAddr)
 	if err != nil {
+		t.Error(err)
+	}
+
+	if err = proxy.SendMessage(c, []byte("hola!")); err != nil {
 		t.Error(err)
 	}
 
@@ -208,6 +227,10 @@ func TestCreateDestroy(t *testing.T) {
 	res := <-ch
 	if res.err != io.EOF {
 		t.Error("should have gotten EOF from router, but got:", res.err)
+	}
+
+	if len(router.sendQueue.nextConn) > 0 || len(router.replyQueue.nextConn) > 0 {
+		t.Error("Should be no open connections.")
 	}
 }
 
@@ -225,7 +248,7 @@ func TestProxyRouterCell(t *testing.T) {
 		msg[i] = byte(i)
 	}
 
-	// The cell is just right.
+	// This cell is just right.
 	go runRouterReadCell(router, ch)
 	if err = runProxyWriteCell(proxy, msg[:CellBytes]); err != nil {
 		t.Error(err)
@@ -276,7 +299,7 @@ func TestProxyRouterRelay(t *testing.T) {
 
 	for _, l := range trials {
 
-		go runRouterHandleProxy(router, 2, routerCh)
+		go runRouterHandleOneProxy(router, 2, routerCh)
 		reply, err := runProxySendMessage(proxy, msg[:l])
 		if err != nil {
 			t.Errorf("relay (length=%d): %s", l, err)
@@ -307,7 +330,7 @@ func TestMaliciousProxyRouterRelay(t *testing.T) {
 	cell := make([]byte, CellBytes)
 	ch := make(chan testResult)
 
-	go runRouterHandleProxy(router, 2, ch)
+	go runRouterHandleOneProxy(router, 2, ch)
 	c, err := proxy.DialRouter(network, routerAddr)
 	if err != nil {
 		t.Error(err)
@@ -337,7 +360,7 @@ func TestMaliciousProxyRouterRelay(t *testing.T) {
 	c.Close()
 
 	// Bogus destination.
-	go runRouterHandleProxy(router, 2, ch)
+	go runRouterHandleOneProxy(router, 2, ch)
 	c, err = proxy.CreateCircuit(routerAddr, "localhost:9999")
 	if err != nil {
 		t.Error(err)
@@ -347,17 +370,77 @@ func TestMaliciousProxyRouterRelay(t *testing.T) {
 	}
 	_, err = proxy.ReceiveMessage(c)
 	if err == nil || (err != nil && err.Error() != "router error: dial tcp 127.0.0.1:9999: connection refused") {
-		t.Error("should have gotten \"connection refused\" from the router")
+		t.Error("bogus destination, should have gotten \"connection refused\" from the router")
 	}
 	<-ch
 	c.Close()
 
 	// Multihop circuits not supported yet.
-	go runRouterHandleProxy(router, 1, ch)
+	go runRouterHandleOneProxy(router, 1, ch)
 	c, err = proxy.CreateCircuit(routerAddr, "one:234", "two:34", "three:4")
 	if err == nil || (err != nil && err.Error() != "router error: multi-hop circuits not implemented") {
 		t.Error("should have gotten \"multi-hop circuits not implemented\" from router", err)
 	}
 	<-ch
 	c.Close()
+}
+
+// Test timeout on CreateMessage()
+func TestCreateTimeout(t *testing.T) {
+	router, proxy, err := makeContext(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer router.Close()
+	ch := make(chan error)
+
+	// The proxy should get a timeout if it's the only connecting client.
+	go runRouterHandleProxy(router, 1, 1, ch)
+	_, err = proxy.CreateCircuit(routerAddr, "fella:80")
+	if err == nil || (err != nil && err.Error() != "read tcp 127.0.0.1:7007: i/o timeout") {
+		t.Error("should have got i/o timeout, got:", err)
+	}
+	err = <-ch
+	if err != nil {
+		t.Error(err)
+	}
+}
+
+// Test timeout on ReceiveMessage().
+func TestSendMessageTimeout(t *testing.T) {
+	router, proxy, err := makeContext(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer router.Close()
+	ch := make(chan error)
+	done := make(chan bool)
+
+	go runRouterHandleProxy(router, 2, 2, ch)
+
+	// Proxy 1 creates a circuit, sends a message and awaits a reply.
+	go func() {
+		c, err := proxy.CreateCircuit(routerAddr, "fella:80")
+		if err != nil {
+			t.Error(err)
+		}
+		if err = proxy.SendMessage(c, []byte("hello")); err != nil {
+			t.Error(err)
+		}
+		if _, err = proxy.ReceiveMessage(c); err == nil || (err != nil && err.Error() != "read tcp 127.0.0.1:7007: i/o timeout") {
+			t.Error(err)
+		}
+		done <- true
+	}()
+
+	// Proxy 2 just creates a circuit.
+	go func() {
+		_, err = proxy.CreateCircuit(routerAddr, "guy:80")
+		if err != nil {
+			t.Error(err)
+		}
+		done <- true
+	}()
+	<-done
+	<-done
 }
