@@ -17,6 +17,10 @@ package main
 import (
 	"crypto/x509/pkix"
 	"flag"
+	"io"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/golang/glog"
@@ -24,13 +28,8 @@ import (
 	"github.com/jlmucb/cloudproxy/go/tao"
 )
 
-// Run mixnet router service for mixnet clients.
-// TODO(cjpatton) how to handle interrupts so that defers's are called? Tom:
-// signal.Notify allows you to add new signal handlers for a given signal
-// (without removing the old ones). So, you could wrap a deferred function in a
-// signal handler to make sure it gets called (almost) no matter what.
+// Run mixnet router service for mixnet proxies.
 func serveMixnetClients(hp *mixnet.RouterContext) error {
-
 	for {
 		c, err := hp.AcceptProxy()
 		if err != nil {
@@ -40,7 +39,10 @@ func serveMixnetClients(hp *mixnet.RouterContext) error {
 		go func(c *mixnet.Conn) {
 			defer c.Close()
 			for {
-				if err := hp.HandleProxy(c); err != nil {
+				if err := hp.HandleProxy(c); err == io.EOF {
+					glog.Infof("connection no. %d closed by peer.", c.GetID())
+					break
+				} else if err != nil {
 					glog.Errorf("error while serving client no. %d: %s", c.GetID(), err)
 					break
 				}
@@ -75,7 +77,15 @@ func main() {
 	if err != nil {
 		glog.Errorf("failed to configure server: %s", err)
 	}
-	defer hp.Close()
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGKILL)
+	go func() {
+		sig := <-sigs
+		hp.Close()
+		glog.Infof("closing on signal: %s", sig)
+		os.Exit(0)
+	}()
 
 	if err = serveMixnetClients(hp); err != nil {
 		glog.Errorf("error while serving: %s", err)

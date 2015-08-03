@@ -227,7 +227,7 @@ func (sq *Queue) DoQueueErrorHandler(queue *Queue, kill <-chan bool) {
 			d.Error = proto.String(err.Error())
 			cell, e := marshalDirective(&d)
 			if e != nil {
-				glog.Errorf("queue: %s\n", e.Error())
+				glog.Errorf("queue: %s\n", e)
 				return
 			}
 			queue.EnqueueMsg(err.id, cell)
@@ -242,7 +242,7 @@ func (sq *Queue) DoQueueErrorHandlerLog(name string, kill <-chan bool) {
 		case <-kill:
 			return
 		case err := <-sq.err:
-			glog.Errorf("%s (%d): %s\n", name, err.id, err.Error())
+			glog.Errorf("%s, client no. %d: %s\n", name, err.id, err)
 		}
 	}
 }
