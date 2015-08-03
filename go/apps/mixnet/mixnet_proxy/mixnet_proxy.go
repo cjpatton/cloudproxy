@@ -16,31 +16,50 @@ package main
 
 import (
 	"flag"
+	"time"
 
 	"github.com/golang/glog"
 	"github.com/jlmucb/cloudproxy/go/apps/mixnet"
 )
 
 // Command line arguments.
-var serverAddr = flag.String("addr", "localhost:8123", "Address and port for Tao server.")
-var serverNetwork = flag.String("network", "tcp", "Network protocol for Tao server.")
+var proxyAddr = flag.String("proxy_addr", "localhost:8123", "Address and port for the Tao-delegated mixnet router.")
+var routerAddr = flag.String("router_addr", "localhost:8123", "Address and port for the Tao-delegated mixnet router.")
+var network = flag.String("network", "tcp", "Network protocol for the mixnet proxy and router.")
 var configPath = flag.String("config", "tao.config", "Path to domain configuration file.")
+var timeoutDuration = flag.String("timeout", "10s", "Timeout on TCP connections, e.g. \"10s\".")
 
 func main() {
 	flag.Parse()
-	p, err := mixnet.NewProxyContext(*configPath, *serverNetwork)
+	timeout, err := time.ParseDuration(*timeoutDuration)
+	if err != nil {
+		glog.Fatalf("failed to parse timeout duration: %s", err)
+	}
+
+	proxy, err := mixnet.NewProxyContext(*configPath, *network, timeout)
 	if err != nil {
 		glog.Fatalf("failed to configure proxy: %s", err)
 	}
 
-	c, err := p.DialRouter(*serverNetwork, *serverAddr)
+	c, err := proxy.CreateCircuit(*routerAddr, "localhost:8080")
 	if err != nil {
-		glog.Fatalf("failed to connect to router: %s", err)
+		glog.Fatalf("CreateCircuit(): %s", err)
 	}
 	defer c.Close()
 
-	if _, err = c.Write([]byte("Hello!")); err != nil {
-		glog.Errorf("failed to send message: %s", err)
+	if err = proxy.SendMessage(c, []byte("Hello!!!")); err != nil {
+		glog.Errorf("SendMessage(): %s", err)
+	}
+
+	reply, err := proxy.ReceiveMessage(c)
+	if err != nil {
+		glog.Errorf("ReceiveMessage(): %s", err)
+	} else {
+		glog.Info("Got: ", string(reply))
+	}
+
+	if err = proxy.DestroyCircuit(c); err != nil {
+		glog.Error("DestroyCircuit(): %s", err)
 	}
 
 	glog.Flush()

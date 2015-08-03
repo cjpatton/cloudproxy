@@ -20,7 +20,7 @@ sudo test true
 
 
 ### Create domain.
-echo "----------------- Creating domain."
+echo "Creating domain."
 GUARD="Datalog"
 SCRIPT_PATH="$(readlink -e "$(dirname "$0")")"
 TEMPLATE="${SCRIPT_PATH}"/domain_template.pb
@@ -50,37 +50,39 @@ echo host_name: \"$KEY_NAME\" >> $TEMP_FILE
 mkdir -p "${DOMAIN}.pub/${HOST_REL_PATH}"
 cp $DOMAIN/$HOST_REL_PATH/{cert,keys} "${DOMAIN_PUB}/${HOST_REL_PATH}"
 echo "Temp public domain directory: ${DOMAIN_PUB}"
-
+echo
 
 ### Start TaoCA.
-echo "----------------- Starting TaoCA"
+echo "Starting TaoCA"
 "$(gowhich tcca)" -config ${DOMAIN}/tao.config -password ${FAKE_PASS} &
 CAPID=$!
 sleep 2
+echo
 
 ### Start LinuxHost.
-echo "----------------- Starting LinuxHost"
+echo "Starting LinuxHost"
 sudo "$(gowhich linux_host)" -config_path ${DOMAIN_PUB}/tao.config \
      -pass ${FAKE_PASS} &
 HOSTPID=$!
 sleep 2
+echo
 
+### Start a dummy service
+echo "Starting a test server"
+echo "Who is this?" | nc -l 8080 >/dev/null &
 
 ### Start mixnet router.
 echo "Starting Mixnet Router"
-DSPID=$("$(gowhich tao_launch)" -sock ${DOMAIN_PUB}/linux_tao_host/admin_socket \
+ROUTERPID=$("$(gowhich tao_launch)" -sock ${DOMAIN_PUB}/linux_tao_host/admin_socket \
 	"$(gowhich mixnet_router)" -config=${DOMAIN_PUB}/tao.config)
-
 
 ### Start mixnet proxy.
 echo "Starting Mixnet Proxy"
 "$(gowhich mixnet_proxy)" -config=${DOMAIN_PUB}/tao.config
-
-echo "Waiting for the tests to finish"
-sleep 2
+echo
 
 echo "Cleaning up remaining programs"
-kill $DSPID
-kill $CAPID
+kill $ROUTERPID
+killall tcca
 sudo kill $HOSTPID
 sudo rm -f ${DOMAIN_PUB}/linux_tao_host/admin_socket

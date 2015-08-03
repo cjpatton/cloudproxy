@@ -17,8 +17,6 @@ package main
 import (
 	"crypto/x509/pkix"
 	"flag"
-	"io"
-	"net"
 	"time"
 
 	"github.com/golang/glog"
@@ -26,39 +24,38 @@ import (
 	"github.com/jlmucb/cloudproxy/go/tao"
 )
 
-// Handle connections from mixnet clients.
-func handleMixnetClient(conn net.Conn, ch chan<- error) {
-	// TODO(cjpatton) for now, just receive a cell.
-	cell := make([]byte, mixnet.CellBytes)
-	if _, err := conn.Read(cell); err != nil {
-		ch <- err
-	}
-	ch <- nil
-}
-
 // Run mixnet router service for mixnet clients.
 // TODO(cjpatton) how to handle interrupts so that defers's are called? Tom:
 // signal.Notify allows you to add new signal handlers for a given signal
 // (without removing the old ones). So, you could wrap a deferred function in a
 // signal handler to make sure it gets called (almost) no matter what.
 func serveMixnetClients(hp *mixnet.RouterContext) error {
-	ch := make(chan error)
-	conn, err := hp.AcceptProxy()
-	if err != nil {
-		return err
+
+	for {
+		c, err := hp.AcceptProxy()
+		if err != nil {
+			return err
+		}
+
+		go func(c *mixnet.Conn) {
+			defer c.Close()
+			for {
+				if err := hp.HandleProxy(c); err != nil {
+					glog.Errorf("error while serving client no. %d: %s", c.GetID(), err)
+					break
+				}
+			}
+		}(c)
 	}
-	defer conn.Close()
-
-	go handleMixnetClient(conn, ch)
-
-	return <-ch
+	return nil
 }
 
 // Command line arguments.
-var serverAddr = flag.String("addr", "localhost:8123", "Address and port for Tao server.")
-var serverNetwork = flag.String("network", "tcp", "Network protocol for Tao server.")
+var routerAddr = flag.String("addr", "localhost:8123", "Address and port for the Tao-delegated mixnet router.")
+var routerNetwork = flag.String("network", "tcp", "Network protocol for the Tao-delegated mixnet router.")
 var configPath = flag.String("config", "tao.config", "Path to domain configuration file.")
-var batchSize = flag.Int("batch", 2, "Number of senders in a batch.")
+var batchSize = flag.Int("batch", 1, "Number of senders in a batch.")
+var timeoutDuration = flag.String("timeout", "10s", "Timeout on TCP connections, e.g. \"10s\".")
 
 // x509 identity of the mixnet router.
 var x509Identity pkix.Name = pkix.Name{
@@ -68,16 +65,20 @@ var x509Identity pkix.Name = pkix.Name{
 
 func main() {
 	flag.Parse()
-	timeout, _ := time.ParseDuration("5s") // TODO(cjpatton) make this a command line parameter.
-	hp, err := mixnet.NewRouterContext(*configPath, *serverNetwork, *serverAddr, *batchSize,
+	timeout, err := time.ParseDuration(*timeoutDuration)
+	if err != nil {
+		glog.Errorf("failed to parse timeout duration: %s", err)
+	}
+
+	hp, err := mixnet.NewRouterContext(*configPath, *routerNetwork, *routerAddr, *batchSize,
 		timeout, &x509Identity, tao.Parent())
 	if err != nil {
 		glog.Errorf("failed to configure server: %s", err)
 	}
 	defer hp.Close()
 
-	if err = serveMixnetClients(hp); err != nil && err != io.EOF {
-		glog.Errorf("error occured while serving: %s", err)
+	if err = serveMixnetClients(hp); err != nil {
+		glog.Errorf("error while serving: %s", err)
 	}
 
 	glog.Flush()
