@@ -15,36 +15,68 @@
 package mixnet
 
 import (
+	"bytes"
+	"io"
 	"testing"
 
 	netproxy "golang.org/x/net/proxy"
 )
 
+// Run proxy server.
 func runSocksServer(proxy *ProxyContext, ch chan<- testResult) {
 	c, addr, err := proxy.Accept()
 	if err != nil {
 		ch <- testResult{err, nil}
 		return
 	}
+
 	defer c.Close()
-	ch <- testResult{nil, []byte(addr)}
+
+	err = proxy.ServeClient(c, routerAddr, addr)
+	ch <- testResult{err, []byte(addr)}
 }
 
-func runSocksClient() error {
+// Connect to a destination through a mixnet proxy, send a message,
+// and wait for a response.
+func runSocksClient(msg []byte) testResult {
 	dialer, err := netproxy.SOCKS5(network, proxyAddr, nil, netproxy.Direct)
 	if err != nil {
-		return err
+		return testResult{err, nil}
 	}
 
 	c, err := dialer.Dial(network, dstAddr)
 	if err != nil {
-		return err
+		return testResult{err, nil}
 	}
-	c.Close()
-	return nil
+	defer c.Close()
+
+	if _, err = c.Write(msg); err != nil {
+		return testResult{err, nil}
+	}
+
+	reply := make([]byte, MaxMsgBytes)
+	bytes, err := c.Read(reply)
+	if err != nil {
+		return testResult{err, nil}
+	}
+
+	// Just for fun, try again.
+	if _, err = c.Write(msg); err != nil {
+		return testResult{err, nil}
+	}
+
+	reply = make([]byte, MaxMsgBytes)
+	bytes, err = c.Read(reply)
+	if err != nil {
+		return testResult{err, nil}
+	}
+
+	return testResult{nil, reply[:bytes]}
 }
 
-func TestSocksServe(t *testing.T) {
+// Test mixnet end-to-end with one client. Proxy a protocl through mixnet. The
+// client sends the server a message and the server echoes it back; repeat.
+func TestMixnetOne(t *testing.T) {
 
 	router, proxy, err := makeContext(1)
 	if err != nil {
@@ -53,13 +85,29 @@ func TestSocksServe(t *testing.T) {
 	defer router.Close()
 	defer proxy.Close()
 
-	ch := make(chan testResult)
-	go runSocksServer(proxy, ch)
+	proxyCh := make(chan testResult)
+	routerCh := make(chan testResult)
+	dstCh := make(chan testResult)
+	var res testResult
 
-	if err = runSocksClient(); err != nil {
-		router.Close()
-		t.Fatal(err)
+	go runSocksServer(proxy, proxyCh)
+	go runRouterHandleOneProxy(router, 4, routerCh)
+	go runDummyServer(1, 2, dstCh)
+
+	msg := []byte("Who am I?")
+	if res := runSocksClient(msg); res.err != nil {
+		t.Error(res.err)
+	} else if bytes.Compare(msg, res.msg) != 0 {
+		t.Error("received message different from sent")
 	}
 
-	t.Log("destination:", string((<-ch).msg))
+	res = <-routerCh
+	if res.err != nil && res.err != io.EOF {
+		t.Error(res.err)
+	}
+
+	res = <-proxyCh
+	if res.err != nil {
+		t.Error(res.err)
+	}
 }

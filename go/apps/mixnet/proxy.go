@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/jlmucb/cloudproxy/go/tao"
 )
 
@@ -241,7 +242,7 @@ func (p *ProxyContext) Accept() (net.Conn, string, error) {
 
 	// First, wait for greeting from client containing the SOCKS version and
 	// requested methods.
-	buf := make([]byte, CellBytes*4)
+	buf := make([]byte, MaxMsgBytes)
 	if _, err = c.Read(buf); err != nil {
 		c.Close()
 		return nil, "", err
@@ -286,8 +287,9 @@ func (p *ProxyContext) Accept() (net.Conn, string, error) {
 	cmd := buf[1]
 	atyp := buf[3]
 
-	// Only CONNECT to IPv4 addresses is allowed. Since traffic will be proxied over
-	// the mixnet, don't connect to the intended host just yet; call CreateCircuit().
+	// Only CONNECT to IPv4 addresses is allowed. Since traffic will be proxied
+	// over the mixnet, don't connect to the intended host just yet. Reply to
+	// the client.
 	if ver == SocksVersion && cmd == 0x01 /* CONNECT */ && atyp == 0x01 /* IPv4 */ {
 		buf[1] = 0x00 // SUCCEEDED.
 	} else {
@@ -308,4 +310,40 @@ func (p *ProxyContext) Accept() (net.Conn, string, error) {
 		strconv.Itoa(int(buf[7])) + ":" + port
 
 	return c, dstAddr, nil
+}
+
+func (p *ProxyContext) ServeClient(c net.Conn, addrs ...string) error {
+
+	_ = glog.Error
+	d, err := p.CreateCircuit(addrs...)
+	if err != nil {
+		return err
+	}
+	defer p.DestroyCircuit(d)
+
+	for {
+
+		msg := make([]byte, MaxMsgBytes)
+		bytes, err := c.Read(msg)
+		if err == io.EOF {
+			glog.Info("proxy: encountered EOF while serving")
+			break
+		}
+		if err != nil {
+			glog.Errorf("proxy: error while serving client: %s", err)
+			return err
+		}
+
+		_, err = c.Write(msg[:bytes])
+		if err == io.EOF {
+			glog.Info("proxy: encountered EOF while serving")
+			break
+		}
+		if err != nil {
+			glog.Errorf("proxy: error while serving client: %s", err)
+			return err
+		}
+	}
+
+	return nil
 }
