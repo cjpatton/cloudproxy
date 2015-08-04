@@ -17,7 +17,6 @@ package mixnet
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"strconv"
@@ -232,11 +231,12 @@ func (p *ProxyContext) nextID() (id uint64) {
 // Accept partially implements the server role in version 5 of the SOCKS
 // protocol specified in RFC 1928. In particular, it only supports TCP clients
 // with no authentication who request CONNECT to IPv4 addresses; neither BIND
-// nor UDP ASSOCIATE are supported.
-func (p *ProxyContext) Accept() (net.Conn, error) {
+// nor UDP ASSOCIATE are supported. Return the connection to the client and the
+// requested destination address.
+func (p *ProxyContext) Accept() (net.Conn, string, error) {
 	c, err := p.listener.Accept()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// First, wait for greeting from client containing the SOCKS version and
@@ -244,7 +244,7 @@ func (p *ProxyContext) Accept() (net.Conn, error) {
 	buf := make([]byte, CellBytes*4)
 	if _, err = c.Read(buf); err != nil {
 		c.Close()
-		return nil, err
+		return nil, "", err
 	}
 
 	// Only the NO AUTHENTICATION REQUIRED method is allowed. Note that this
@@ -267,20 +267,20 @@ func (p *ProxyContext) Accept() (net.Conn, error) {
 
 	if _, err = c.Write(buf[:2]); err != nil {
 		c.Close()
-		return nil, err
+		return nil, "", err
 	}
 
 	// If NO ACCEPTBALE METHOD, the client closes the connection.
 	if buf[1] != 0x00 {
 		c.Close()
-		return nil, errors.New("socks: client did not provide acceptable method")
+		return nil, "", errors.New("socks: client did not provide acceptable method")
 	}
 
 	// Third, wait for command from client.
 	bytes, err := c.Read(buf)
 	if err != nil {
 		c.Close()
-		return nil, err
+		return nil, "", err
 	}
 	ver = int(buf[0])
 	cmd := buf[1]
@@ -295,7 +295,7 @@ func (p *ProxyContext) Accept() (net.Conn, error) {
 	}
 	if _, err = c.Write(buf[:bytes]); err != nil {
 		c.Close()
-		return nil, err
+		return nil, "", err
 	}
 
 	// dstAddr specifies the destination of the client. At this point the
@@ -307,7 +307,5 @@ func (p *ProxyContext) Accept() (net.Conn, error) {
 		strconv.Itoa(int(buf[6])) + "." +
 		strconv.Itoa(int(buf[7])) + ":" + port
 
-	fmt.Println(dstAddr)
-
-	return c, nil
+	return c, dstAddr, nil
 }

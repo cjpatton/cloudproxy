@@ -15,20 +15,19 @@
 package mixnet
 
 import (
-	"fmt"
 	"testing"
 
 	netproxy "golang.org/x/net/proxy"
 )
 
 func runSocksServer(proxy *ProxyContext, ch chan<- testResult) {
-	c, err := proxy.Accept()
+	c, addr, err := proxy.Accept()
 	if err != nil {
 		ch <- testResult{err, nil}
 		return
 	}
 	defer c.Close()
-	ch <- testResult{nil, nil}
+	ch <- testResult{nil, []byte(addr)}
 }
 
 func runSocksClient() error {
@@ -41,10 +40,7 @@ func runSocksClient() error {
 	if err != nil {
 		return err
 	}
-	defer c.Close()
-
-	fmt.Println("got here")
-
+	c.Close()
 	return nil
 }
 
@@ -54,7 +50,7 @@ func TestSocksServe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router.Close()
+	defer router.Close()
 	defer proxy.Close()
 
 	ch := make(chan testResult)
@@ -65,5 +61,5 @@ func TestSocksServe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	<-ch
+	t.Log("destination:", string((<-ch).msg))
 }
