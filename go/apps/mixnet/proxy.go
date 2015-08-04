@@ -249,7 +249,7 @@ func (p *ProxyContext) Accept() (net.Conn, string, error) {
 	}
 
 	// Only the NO AUTHENTICATION REQUIRED method is allowed. Note that this
-	// makes the server non-complient since GSSAPI is not allowed.
+	// makes the server non-compliant since GSSAPI is not allowed.
 	ver := int(buf[0])
 	nmethods := int(buf[1])
 	ok := false
@@ -312,6 +312,11 @@ func (p *ProxyContext) Accept() (net.Conn, string, error) {
 	return c, dstAddr, nil
 }
 
+// ServeClient creates a circuit over the mixnet and relays messages to a
+// destination (specified by addrs[len(addrds)-1]) on beahlf of the client.
+// Read a message from the client, send it over the mixnet, wait for a reply,
+// and forward it the client. Once an EOF is encountered (or some other error
+// occurs), destroy the circuit.
 func (p *ProxyContext) ServeClient(c net.Conn, addrs ...string) error {
 
 	_ = glog.Error
