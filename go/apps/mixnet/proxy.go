@@ -17,24 +17,31 @@ package mixnet
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
+	"net"
+	"strconv"
 	"time"
 
 	"github.com/jlmucb/cloudproxy/go/tao"
 )
 
+const SocksVersion = 0x05
+
 // ProxyContext stores the runtime environment for a mixnet proxy. A mixnet
 // proxy connects to a mixnet router on behalf of a client's application.
 type ProxyContext struct {
-	domain *tao.Domain // Policy guard and public key.
-	id     uint64      // Next serial identifier that will assigned to a new connection.
+	domain   *tao.Domain  // Policy guard and public key.
+	listener net.Listener // SOCKS5 server for listening to clients.
+
+	id uint64 // Next serial identifier that will assigned to a new connection.
 
 	network string        // Network protocol, e.g. "tcp".
 	timeout time.Duration // Timeout on read.
 }
 
 // NewProxyContext loads a domain from a local configuration.
-func NewProxyContext(path, network string, timeout time.Duration) (p *ProxyContext, err error) {
+func NewProxyContext(path, network, addr string, timeout time.Duration) (p *ProxyContext, err error) {
 	p = new(ProxyContext)
 	p.network = network
 	p.timeout = timeout
@@ -44,7 +51,17 @@ func NewProxyContext(path, network string, timeout time.Duration) (p *ProxyConte
 		return nil, err
 	}
 
+	if p.listener, err = net.Listen(network, addr); err != nil {
+		return nil, err
+	}
+
 	return p, nil
+}
+
+func (p *ProxyContext) Close() {
+	if p.listener != nil {
+		p.listener.Close()
+	}
 }
 
 // DialRouter connects anonymously to a remote Tao-delegated mixnet router.
@@ -210,4 +227,87 @@ func (p *ProxyContext) nextID() (id uint64) {
 	id = p.id
 	p.id++
 	return id
+}
+
+// Accept partially implements the server role in version 5 of the SOCKS
+// protocol specified in RFC 1928. In particular, it only supports TCP clients
+// with no authentication who request CONNECT to IPv4 addresses; neither BIND
+// nor UDP ASSOCIATE are supported.
+func (p *ProxyContext) Accept() (net.Conn, error) {
+	c, err := p.listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+
+	// First, wait for greeting from client containing the SOCKS version and
+	// requested methods.
+	buf := make([]byte, CellBytes*4)
+	if _, err = c.Read(buf); err != nil {
+		c.Close()
+		return nil, err
+	}
+
+	// Only the NO AUTHENTICATION REQUIRED method is allowed. Note that this
+	// makes the server non-complient since GSSAPI is not allowed.
+	ver := int(buf[0])
+	nmethods := int(buf[1])
+	ok := false
+	for _, method := range buf[2 : 2+nmethods] {
+		if method == 0x00 {
+			ok = true
+		}
+	}
+
+	// Second, reply with selected method.
+	if ver == SocksVersion && ok {
+		buf[1] = 0x00 // NO AUTHENTICATION REQUIRED
+	} else {
+		buf[1] = 0xff // NO ACCEPTABLE METHODS
+	}
+
+	if _, err = c.Write(buf[:2]); err != nil {
+		c.Close()
+		return nil, err
+	}
+
+	// If NO ACCEPTBALE METHOD, the client closes the connection.
+	if buf[1] != 0x00 {
+		c.Close()
+		return nil, errors.New("socks: client did not provide acceptable method")
+	}
+
+	// Third, wait for command from client.
+	bytes, err := c.Read(buf)
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+	ver = int(buf[0])
+	cmd := buf[1]
+	atyp := buf[3]
+
+	// Only CONNECT to IPv4 addresses is allowed. Since traffic will be proxied over
+	// the mixnet, don't connect to the intended host just yet; call CreateCircuit().
+	if ver == SocksVersion && cmd == 0x01 /* CONNECT */ && atyp == 0x01 /* IPv4 */ {
+		buf[1] = 0x00 // SUCCEEDED.
+	} else {
+		buf[2] = 0x07 // COMMAND NOT SUPPORTED
+	}
+	if _, err = c.Write(buf[:bytes]); err != nil {
+		c.Close()
+		return nil, err
+	}
+
+	// dstAddr specifies the destination of the client. At this point the
+	// proxy is ready to construct a circuit and relay a message on behalf of
+	// the client.
+	port := strconv.Itoa((int(buf[bytes-2]) << 8) + int(buf[bytes-1]))
+	dstAddr := strconv.Itoa(int(buf[4])) + "." +
+		strconv.Itoa(int(buf[5])) + "." +
+		strconv.Itoa(int(buf[6])) + "." +
+		strconv.Itoa(int(buf[7])) + ":" + port
+
+	fmt.Println(dstAddr)
+
+	return c, nil
 }

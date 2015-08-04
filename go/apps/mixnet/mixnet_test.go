@@ -30,8 +30,9 @@ import (
 
 var password = make([]byte, 32)
 var network = "tcp"
-var routerAddr = "localhost:7007"
-var dstAddr = "localhost:7009"
+var proxyAddr = "127.0.0.1:1080"
+var routerAddr = "127.0.0.1:7007"
+var dstAddr = "127.0.0.1:7009"
 
 var id = pkix.Name{
 	Organization: []string{"Mixnet tester"},
@@ -75,7 +76,7 @@ func makeContext(batchSize int) (*RouterContext, *ProxyContext, error) {
 	}
 
 	// Create a proxy context. This just loads the domain.
-	proxy, err := NewProxyContext(configPath, network, timeout)
+	proxy, err := NewProxyContext(configPath, network, proxyAddr, timeout)
 	if err != nil {
 		router.Close()
 		return nil, nil, err
@@ -182,6 +183,7 @@ func TestProxyRouterConnect(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer router.Close()
+	defer proxy.Close()
 
 	// Wait for a connection from the proxy.
 	ch := make(chan bool)
@@ -207,6 +209,7 @@ func TestCreateDestroy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer router.Close()
+	defer proxy.Close()
 
 	ch := make(chan testResult)
 	go runRouterHandleOneProxy(router, 3, ch)
@@ -241,6 +244,7 @@ func TestProxyRouterCell(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer router.Close()
+	defer proxy.Close()
 	ch := make(chan testResult)
 
 	msg := make([]byte, CellBytes+1)
@@ -279,6 +283,7 @@ func TestProxyRouterRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer router.Close()
+	defer proxy.Close()
 	routerCh := make(chan testResult)
 	dstCh := make(chan testResult)
 
@@ -327,6 +332,7 @@ func TestMaliciousProxyRouterRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer router.Close()
+	defer proxy.Close()
 	cell := make([]byte, CellBytes)
 	ch := make(chan testResult)
 
@@ -361,7 +367,7 @@ func TestMaliciousProxyRouterRelay(t *testing.T) {
 
 	// Bogus destination.
 	go runRouterHandleOneProxy(router, 2, ch)
-	c, err = proxy.CreateCircuit(routerAddr, "localhost:9999")
+	c, err = proxy.CreateCircuit(routerAddr, "127.0.0.1:9999")
 	if err != nil {
 		t.Error(err)
 	}
@@ -392,6 +398,7 @@ func TestCreateTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer router.Close()
+	defer proxy.Close()
 	ch := make(chan error)
 
 	// The proxy should get a timeout if it's the only connecting client.
@@ -413,6 +420,7 @@ func TestSendMessageTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer router.Close()
+	defer proxy.Close()
 	ch := make(chan error)
 	done := make(chan bool)
 

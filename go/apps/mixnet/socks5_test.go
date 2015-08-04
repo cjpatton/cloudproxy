@@ -15,14 +15,55 @@
 package mixnet
 
 import (
+	"fmt"
 	"testing"
 
-	"golang.org/x/net/proxy"
+	netproxy "golang.org/x/net/proxy"
 )
 
-func TestSocks5Serve(t *testing.T) {
-	_, err := proxy.SOCKS5("tcp", "localhos:1080", nil, nil)
+func runSocksServer(proxy *ProxyContext, ch chan<- testResult) {
+	c, err := proxy.Accept()
+	if err != nil {
+		ch <- testResult{err, nil}
+		return
+	}
+	defer c.Close()
+	ch <- testResult{nil, nil}
+}
+
+func runSocksClient() error {
+	dialer, err := netproxy.SOCKS5(network, proxyAddr, nil, netproxy.Direct)
+	if err != nil {
+		return err
+	}
+
+	c, err := dialer.Dial(network, dstAddr)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	fmt.Println("got here")
+
+	return nil
+}
+
+func TestSocksServe(t *testing.T) {
+
+	router, proxy, err := makeContext(1)
 	if err != nil {
 		t.Fatal(err)
 	}
+	router.Close()
+	defer proxy.Close()
+
+	ch := make(chan testResult)
+	go runSocksServer(proxy, ch)
+
+	if err = runSocksClient(); err != nil {
+		router.Close()
+		t.Fatal(err)
+	}
+
+	<-ch
 }
