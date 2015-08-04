@@ -16,11 +16,15 @@ package mixnet
 
 import (
 	"bytes"
-	"io"
+	"errors"
+	"fmt"
+	"strconv"
 	"testing"
 
 	netproxy "golang.org/x/net/proxy"
 )
+
+var _ = fmt.Println
 
 // Run proxy server.
 func runSocksServer(proxy *ProxyContext, ch chan<- testResult) {
@@ -38,7 +42,7 @@ func runSocksServer(proxy *ProxyContext, ch chan<- testResult) {
 
 // Connect to a destination through a mixnet proxy, send a message,
 // and wait for a response.
-func runSocksClient(msg []byte) testResult {
+func runSocksClient(proxyAddr string, msg []byte) testResult {
 	dialer, err := netproxy.SOCKS5(network, proxyAddr, nil, netproxy.Direct)
 	if err != nil {
 		return testResult{err, nil}
@@ -60,54 +64,77 @@ func runSocksClient(msg []byte) testResult {
 		return testResult{err, nil}
 	}
 
-	// Just for fun, try again.
-	if _, err = c.Write(msg); err != nil {
-		return testResult{err, nil}
-	}
-
-	reply = make([]byte, MaxMsgBytes)
-	bytes, err = c.Read(reply)
-	if err != nil {
-		return testResult{err, nil}
-	}
-
 	return testResult{nil, reply[:bytes]}
 }
 
-// Test mixnet end-to-end with one client. Proxy a protocl through mixnet. The
-// client sends the server a message and the server echoes it back; repeat.
-func TestMixnetOne(t *testing.T) {
+// Test mixnet end-to-end many clients. Proxy a protocol through mixnet. The
+// client sends the server a message and the server echoes it back.
+func TestMixnet(t *testing.T) {
+	batchSize := 20
 
-	router, proxy, err := makeContext(1)
+	router, proxy, err := makeContext(batchSize)
 	if err != nil {
 		t.Fatal(err)
 	}
+	proxy.Close()
 	defer router.Close()
-	defer proxy.Close()
 
-	proxyCh := make(chan testResult)
-	routerCh := make(chan testResult)
+	routerCh := make(chan error)
 	dstCh := make(chan testResult)
 	var res testResult
 
-	go runSocksServer(proxy, proxyCh)
-	go runRouterHandleOneProxy(router, 4, routerCh)
-	go runDummyServer(1, 2, dstCh)
+	// Run RouterContext.HanleProxy four times (CreateCircuit(), SendMessage(),
+	// SendMessage(), and DestroyCircuit()) for each client.
+	go runRouterHandleProxy(router, batchSize, 2, routerCh)
 
-	msg := []byte("Who am I?")
-	if res := runSocksClient(msg); res.err != nil {
-		t.Error(res.err)
-	} else if bytes.Compare(msg, res.msg) != 0 {
-		t.Error("received message different from sent")
+	// Echo two messages per client.
+	go runDummyServer(batchSize, 2, dstCh)
+
+	// Spawn a client/proxy for each test.
+	ch := make(chan error)
+	for i := 0; i < batchSize; i++ {
+		go func(i int, ch chan<- error) {
+
+			// Create a ProxyContext and bind a proxy to a port for each client.
+			proxyCh := make(chan testResult)
+			proxyAddr := "127.0.0.1:" + strconv.Itoa(1080+i)
+			proxy, err = makeProxyContext(proxyAddr)
+			if err != nil {
+				ch <- err
+				return
+			}
+			defer proxy.Close()
+
+			// Run SOCKS5 proxy.
+			go runSocksServer(proxy, proxyCh)
+
+			// Run client.
+			msg := []byte(fmt.Sprintf("Who am I? I am %d.", i))
+			if res := runSocksClient(proxyAddr, msg); res.err != nil {
+				ch <- err
+				return
+			} else if bytes.Compare(msg, res.msg) != 0 {
+				ch <- errors.New("received message different from sent")
+				return
+			}
+
+			// Wait for proxy to finish.
+			res = <-proxyCh
+			if res.err != nil {
+				ch <- res.err
+				return
+			}
+			ch <- nil
+		}(i, ch)
 	}
 
-	res = <-routerCh
-	if res.err != nil && res.err != io.EOF {
-		t.Error(res.err)
-	}
-
-	res = <-proxyCh
-	if res.err != nil {
-		t.Error(res.err)
+	// Wait for all client/proxy routines to finish.
+	for i := 0; i < batchSize; i++ {
+		select {
+		case err = <-ch:
+			if err != nil {
+				t.Error(err)
+			}
+		}
 	}
 }

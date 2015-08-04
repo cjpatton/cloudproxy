@@ -33,6 +33,9 @@ var network = "tcp"
 var proxyAddr = "127.0.0.1:1080"
 var routerAddr = "127.0.0.1:7007"
 var dstAddr = "127.0.0.1:7009"
+var timeout, _ = time.ParseDuration("1s")
+var configDir = "/tmp/mixnet_test_domain"
+var configPath = path.Join(configDir, "tao.config")
 
 var id = pkix.Name{
 	Organization: []string{"Mixnet tester"},
@@ -47,10 +50,6 @@ func makeTrivialDomain(configDir string) (*tao.Domain, error) {
 }
 
 func makeContext(batchSize int) (*RouterContext, *ProxyContext, error) {
-
-	timeout, _ := time.ParseDuration("1s")
-	configDir := "/tmp/mixnet_test_domain"
-	configPath := path.Join(configDir, "tao.config")
 
 	// Create a domain with a LiberalGuard.
 	_, err := makeTrivialDomain(configDir)
@@ -83,6 +82,27 @@ func makeContext(batchSize int) (*RouterContext, *ProxyContext, error) {
 	}
 
 	return router, proxy, nil
+}
+
+func makeProxyContext(proxyAddr string) (*ProxyContext, error) {
+
+	// Create a domain with a LiberalGuard.
+	_, err := makeTrivialDomain(configDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// CrateDomain() saves the configuration to disk; delete this now since
+	// we don't need it.
+	defer os.RemoveAll(configDir)
+
+	// Create a proxy context. This just loads the domain.
+	proxy, err := NewProxyContext(configPath, network, proxyAddr, timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	return proxy, nil
 }
 
 type testResult struct {
@@ -142,6 +162,7 @@ func runRouterHandleOneProxy(router *RouterContext, requestCount int, ch chan<- 
 }
 
 func runRouterHandleProxy(router *RouterContext, clientCt, requestCt int, ch chan<- error) {
+	done := make(chan bool)
 	for i := 0; i < clientCt; i++ {
 		c, err := router.AcceptProxy()
 		if err != nil {
@@ -154,7 +175,11 @@ func runRouterHandleProxy(router *RouterContext, clientCt, requestCt int, ch cha
 			for j := 0; j < requestCt; j++ {
 				ch <- router.HandleProxy(c)
 			}
+			done <- true
 		}(c)
+	}
+	for i := 0; i < clientCt*requestCt; i++ {
+		<-done
 	}
 }
 
