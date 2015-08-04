@@ -18,6 +18,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"net"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 )
@@ -50,11 +51,13 @@ var dirDestroy = &Directive{Type: DirectiveType_DESTROY.Enum()}
 // protocol.
 type Conn struct {
 	net.Conn
-	id uint64 // Serial identifier of connection in a given context.
+	id      uint64        // Serial identifier of connection in a given context.
+	timeout time.Duration // timeout on read/write.
 }
 
 // Read a cell from the channel. If len(msg) != CellBytes, return an error.
-func (c Conn) Read(msg []byte) (n int, err error) {
+func (c *Conn) Read(msg []byte) (n int, err error) {
+	c.Conn.SetDeadline(time.Now().Add(c.timeout))
 	n, err = c.Conn.Read(msg)
 	if err != nil {
 		return n, err
@@ -67,6 +70,7 @@ func (c Conn) Read(msg []byte) (n int, err error) {
 
 // Write a cell to the channel. If the len(cell) != CellBytes, return an error.
 func (c *Conn) Write(msg []byte) (n int, err error) {
+	c.Conn.SetDeadline(time.Now().Add(c.timeout))
 	if len(msg) != CellBytes {
 		return 0, errCellLength
 	}

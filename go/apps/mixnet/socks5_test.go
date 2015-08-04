@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"strconv"
 	"testing"
+	"time"
 
 	netproxy "golang.org/x/net/proxy"
 )
@@ -54,11 +55,13 @@ func runSocksClient(proxyAddr string, msg []byte) testResult {
 	}
 	defer c.Close()
 
+	c.SetDeadline(time.Now().Add(timeout))
 	if _, err = c.Write(msg); err != nil {
 		return testResult{err, nil}
 	}
 
 	reply := make([]byte, MaxMsgBytes)
+	c.SetDeadline(time.Now().Add(timeout))
 	bytes, err := c.Read(reply)
 	if err != nil {
 		return testResult{err, nil}
@@ -70,9 +73,9 @@ func runSocksClient(proxyAddr string, msg []byte) testResult {
 // Test mixnet end-to-end many clients. Proxy a protocol through mixnet. The
 // client sends the server a message and the server echoes it back.
 func TestMixnet(t *testing.T) {
-	batchSize := 20
+	clientCt := 20
 
-	router, proxy, err := makeContext(batchSize)
+	router, proxy, err := makeContext(clientCt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,14 +88,14 @@ func TestMixnet(t *testing.T) {
 
 	// Run RouterContext.HanleProxy four times (CreateCircuit(), SendMessage(),
 	// SendMessage(), and DestroyCircuit()) for each client.
-	go runRouterHandleProxy(router, batchSize, 2, routerCh)
+	go runRouterHandleProxy(router, clientCt, 2, routerCh)
 
 	// Echo two messages per client.
-	go runDummyServer(batchSize, 2, dstCh)
+	go runDummyServer(clientCt, 2, dstCh)
 
 	// Spawn a client/proxy for each test.
 	ch := make(chan error)
-	for i := 0; i < batchSize; i++ {
+	for i := 0; i < clientCt; i++ {
 		go func(i int, ch chan<- error) {
 
 			// Create a ProxyContext and bind a proxy to a port for each client.
@@ -111,7 +114,7 @@ func TestMixnet(t *testing.T) {
 			// Run client.
 			msg := []byte(fmt.Sprintf("Who am I? I am %d.", i))
 			if res := runSocksClient(proxyAddr, msg); res.err != nil {
-				ch <- err
+				ch <- res.err
 				return
 			} else if bytes.Compare(msg, res.msg) != 0 {
 				ch <- errors.New("received message different from sent")
@@ -129,7 +132,7 @@ func TestMixnet(t *testing.T) {
 	}
 
 	// Wait for all client/proxy routines to finish.
-	for i := 0; i < batchSize; i++ {
+	for i := 0; i < clientCt; i++ {
 		select {
 		case err = <-ch:
 			if err != nil {

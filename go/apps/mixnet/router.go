@@ -114,7 +114,7 @@ func (hp *RouterContext) AcceptProxy() (*Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Conn{c, hp.nextID()}, nil
+	return &Conn{c, hp.nextID(), hp.timeout}, nil
 }
 
 // Close releases any resources held by the hosted program.

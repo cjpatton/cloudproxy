@@ -37,7 +37,7 @@ type ProxyContext struct {
 	id uint64 // Next serial identifier that will assigned to a new connection.
 
 	network string        // Network protocol, e.g. "tcp".
-	timeout time.Duration // Timeout on read.
+	timeout time.Duration // Timeout on read/write.
 }
 
 // NewProxyContext loads a domain from a local configuration.
@@ -70,7 +70,7 @@ func (p *ProxyContext) DialRouter(network, addr string) (*Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Conn{c, p.nextID()}, nil
+	return &Conn{c, p.nextID(), p.timeout}, nil
 }
 
 // SendDirective serializes and pads a directive to the length of a cell and
@@ -126,7 +126,6 @@ func (p *ProxyContext) CreateCircuit(addrs ...string) (*Conn, error) {
 	}
 
 	// Wait for CREATED directive from router.
-	c.SetReadDeadline(time.Now().Add(p.timeout))
 	if _, err := p.ReceiveDirective(c, d); err != nil {
 		return c, err
 	} else if *d.Type != DirectiveType_CREATED {
@@ -182,7 +181,6 @@ func (p *ProxyContext) ReceiveMessage(c *Conn) ([]byte, error) {
 
 	// Receive cells from router.
 	cell := make([]byte, CellBytes)
-	c.SetReadDeadline(time.Now().Add(p.timeout))
 	if _, err = c.Read(cell); err != nil && err != io.EOF {
 		return nil, err
 	}
@@ -209,7 +207,6 @@ func (p *ProxyContext) ReceiveMessage(c *Conn) ([]byte, error) {
 	bytes := copy(msg, cell[1+n:])
 
 	for err != io.EOF && uint64(bytes) < msgBytes {
-		c.SetReadDeadline(time.Now().Add(p.timeout))
 		if _, err = c.Read(cell); err != nil && err != io.EOF {
 			return nil, err
 		}
@@ -329,6 +326,7 @@ func (p *ProxyContext) ServeClient(c net.Conn, addrs ...string) error {
 	for {
 
 		msg := make([]byte, MaxMsgBytes)
+		c.SetDeadline(time.Now().Add(p.timeout))
 		bytes, err := c.Read(msg)
 		if err == io.EOF {
 			glog.Info("proxy: encountered EOF while serving")
@@ -339,6 +337,7 @@ func (p *ProxyContext) ServeClient(c net.Conn, addrs ...string) error {
 			return err
 		}
 
+		c.SetDeadline(time.Now().Add(p.timeout))
 		_, err = c.Write(msg[:bytes])
 		if err == io.EOF {
 			glog.Info("proxy: encountered EOF while serving")
