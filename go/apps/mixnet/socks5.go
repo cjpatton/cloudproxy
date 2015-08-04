@@ -15,6 +15,6 @@
 package mixnet
 
 // This program partially implements the server in version 5 of the SOCKS
-// protocol version 5 specified in RFC 1928. In particular, it only supports
-// TCP clients with no authentication who request CONNECT; neither BIND nor
-// UDP ASSOCIATE are supported.
+// protocol specified in RFC 1928. In particular, it only supports TCP clients
+// with no authentication who request CONNECT; neither BIND nor UDP ASSOCIATE
+// are supported.
