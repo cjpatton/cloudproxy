@@ -89,7 +89,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	if err = serveMixnetProxies(hp); err != nil {
+	if err := serveMixnetProxies(hp); err != nil {
 		glog.Errorf("router: error while serving: %s", err)
 	}
 

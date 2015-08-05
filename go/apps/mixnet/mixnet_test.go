@@ -16,7 +16,9 @@ package mixnet
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/binary"
 	"io"
 	"os"
@@ -39,6 +41,13 @@ var configPath = path.Join(configDir, "tao.config")
 
 var id = pkix.Name{
 	Organization: []string{"Mixnet tester"},
+}
+
+// Generate a random hostname.
+func genHostname() string {
+	rb := make([]byte, 16)
+	rand.Read(rb)
+	return base64.URLEncoding.EncodeToString(rb)
 }
 
 func makeTrivialDomain(configDir string) (*tao.Domain, error) {
@@ -264,8 +273,10 @@ func TestCreateDestroy(t *testing.T) {
 		t.Error("should have gotten EOF from router, but got:", res.err)
 	}
 
-	if len(router.sendQueue.nextConn) > 0 || len(router.replyQueue.nextConn) > 0 {
-		t.Error("Should be no open connections.")
+	sendCt := len(router.sendQueue.nextConn)
+	replyCt := len(router.replyQueue.nextConn)
+	if sendCt > 0 || replyCt > 0 {
+		t.Errorf("%d send, %d reply connections open, should be 0", sendCt, replyCt)
 	}
 }
 
@@ -435,9 +446,9 @@ func TestCreateTimeout(t *testing.T) {
 
 	// The proxy should get a timeout if it's the only connecting client.
 	go runRouterHandleProxy(router, 1, 1, ch)
-	_, err = proxy.CreateCircuit(routerAddr, "fella:80")
+	_, err = proxy.CreateCircuit(routerAddr, genHostname()+":80")
 	if err == nil || (err != nil && err.Error() != "read tcp 127.0.0.1:7007: i/o timeout") {
-		t.Error("should have got i/o timeout, got:", err)
+		t.Error("should have got network timeout, got:", err)
 	}
 	res := <-ch
 	if res.err != nil {
@@ -460,7 +471,7 @@ func TestSendMessageTimeout(t *testing.T) {
 
 	// Proxy 1 creates a circuit, sends a message and awaits a reply.
 	go func() {
-		c, err := proxy.CreateCircuit(routerAddr, "fella:80")
+		c, err := proxy.CreateCircuit(routerAddr, genHostname()+":80")
 		if err != nil {
 			t.Error(err)
 		}

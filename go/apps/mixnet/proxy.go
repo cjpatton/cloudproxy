@@ -26,6 +26,7 @@ import (
 	"github.com/jlmucb/cloudproxy/go/tao"
 )
 
+// Version of the SOCKS protocol expected to be implemented by the client.
 const SocksVersion = 0x05
 
 // ProxyContext stores the runtime environment for a mixnet proxy. A mixnet
@@ -34,7 +35,8 @@ type ProxyContext struct {
 	domain   *tao.Domain  // Policy guard and public key.
 	listener net.Listener // SOCKS5 server for listening to clients.
 
-	id uint64 // Next serial identifier that will assigned to a new connection.
+	// Next serial identifier that will be assigned to a new connection.
+	id uint64
 
 	network string        // Network protocol, e.g. "tcp".
 	timeout time.Duration // Timeout on read/write.
@@ -58,6 +60,7 @@ func NewProxyContext(path, network, addr string, timeout time.Duration) (p *Prox
 	return p, nil
 }
 
+// Close unbinds the proxy server socket.
 func (p *ProxyContext) Close() {
 	if p.listener != nil {
 		p.listener.Close()
@@ -66,7 +69,6 @@ func (p *ProxyContext) Close() {
 
 // DialRouter connects anonymously to a remote Tao-delegated mixnet router.
 func (p *ProxyContext) DialRouter(network, addr string) (*Conn, error) {
-	// TODO(cjpatton) add tao.DialTimeout() method.
 	c, err := tao.Dial(network, addr, p.domain.Guard, p.domain.Keys.VerifyingKey, nil)
 	if err != nil {
 		return nil, err
@@ -240,61 +242,64 @@ func (p *ProxyContext) Accept() (net.Conn, string, error) {
 
 	// First, wait for greeting from client containing the SOCKS version and
 	// requested methods.
-	buf := make([]byte, MaxMsgBytes)
-	if _, err = c.Read(buf); err != nil {
+	msg := make([]byte, MaxMsgBytes)
+	reply := make([]byte, MaxMsgBytes)
+	if _, err = c.Read(msg); err != nil {
 		c.Close()
 		return nil, "", err
 	}
 
 	// Only the NO AUTHENTICATION REQUIRED method is allowed. Note that this
 	// makes the server non-compliant since GSSAPI is not allowed.
-	ver := int(buf[0])
-	nmethods := int(buf[1])
+	ver := int(msg[0])
+	nmethods := int(msg[1])
 	ok := false
-	for _, method := range buf[2 : 2+nmethods] {
+	for _, method := range msg[2 : 2+nmethods] {
 		if method == 0x00 {
 			ok = true
+			break
 		}
 	}
 
 	// Second, reply with selected method.
+	reply[0] = SocksVersion
 	if ver == SocksVersion && ok {
-		buf[1] = 0x00 // NO AUTHENTICATION REQUIRED
-		// TODO(cjpatton) set to 0x01 "fixes" proxying netcat
+		reply[1] = 0x00 // NO AUTHENTICATION REQUIRED
 	} else {
-		buf[1] = 0xff // NO ACCEPTABLE METHODS
+		reply[1] = 0xff // NO ACCEPTABLE METHODS
 	}
 
-	if _, err = c.Write(buf[:2]); err != nil {
+	if _, err = c.Write(reply[:2]); err != nil {
 		c.Close()
 		return nil, "", err
 	}
 
-	// If NO ACCEPTBALE METHOD, the client closes the connection.
-	if buf[1] != 0x00 {
+	// If NO ACCEPTABLE METHOD, the client closes the connection.
+	if reply[1] == 0xff {
 		c.Close()
 		return nil, "", errors.New("socks: client did not provide acceptable method")
 	}
 
 	// Third, wait for command from client.
-	bytes, err := c.Read(buf)
+	bytes, err := c.Read(msg)
 	if err != nil {
 		c.Close()
 		return nil, "", err
 	}
-	ver = int(buf[0])
-	cmd := buf[1]
-	atyp := buf[3]
+	ver = int(msg[0])
+	cmd := msg[1]
+	// msg[2] is a reserved byte in the protocol.
+	atyp := msg[3]
 
 	// Only CONNECT to IPv4 addresses is allowed. Since traffic will be proxied
 	// over the mixnet, don't connect to the intended host just yet. Reply to
 	// the client.
 	if ver == SocksVersion && cmd == 0x01 /* CONNECT */ && atyp == 0x01 /* IPv4 */ {
-		buf[1] = 0x00 // SUCCEEDED.
+		msg[1] = 0x00 // SUCCEEDED.
 	} else {
-		buf[2] = 0x07 // COMMAND NOT SUPPORTED
+		msg[1] = 0x07 // COMMAND NOT SUPPORTED
 	}
-	if _, err = c.Write(buf[:bytes]); err != nil {
+	if _, err = c.Write(msg[:bytes]); err != nil {
 		c.Close()
 		return nil, "", err
 	}
@@ -302,11 +307,11 @@ func (p *ProxyContext) Accept() (net.Conn, string, error) {
 	// dstAddr specifies the destination of the client. At this point the
 	// proxy is ready to construct a circuit and relay a message on behalf of
 	// the client.
-	port := strconv.Itoa((int(buf[bytes-2]) << 8) + int(buf[bytes-1]))
-	dstAddr := strconv.Itoa(int(buf[4])) + "." +
-		strconv.Itoa(int(buf[5])) + "." +
-		strconv.Itoa(int(buf[6])) + "." +
-		strconv.Itoa(int(buf[7])) + ":" + port
+	port := strconv.Itoa((int(msg[bytes-2]) << 8) + int(msg[bytes-1]))
+	dstAddr := strconv.Itoa(int(msg[4])) + "." +
+		strconv.Itoa(int(msg[5])) + "." +
+		strconv.Itoa(int(msg[6])) + "." +
+		strconv.Itoa(int(msg[7])) + ":" + port
 
 	return c, dstAddr, nil
 }

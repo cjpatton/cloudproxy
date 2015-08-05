@@ -77,6 +77,45 @@ func runSocksClient(proxyAddr string, msg []byte) testResult {
 	return testResult{nil, msg[:bytes]}
 }
 
+// Test the SOCKS proxy server.
+func TestSocks(t *testing.T) {
+
+	proxy, err := makeProxyContext(proxyAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proxy.Close()
+
+	ch := make(chan testResult)
+	go func() {
+		c, addr, err := proxy.Accept()
+		if err != nil {
+			ch <- testResult{err, nil}
+			return
+		}
+		c.Close()
+		ch <- testResult{nil, []byte(addr)}
+	}()
+
+	dialer, err := netproxy.SOCKS5(network, proxyAddr, nil, netproxy.Direct)
+	if err != nil {
+		t.Error(err)
+	}
+
+	c, err := dialer.Dial(network, dstAddr)
+	if err != nil {
+		t.Error(err)
+	}
+	c.Close()
+
+	res := <-ch
+	if res.err != nil {
+		t.Error(res.err)
+	} else {
+		t.Log("server got:", string(res.msg))
+	}
+}
+
 // Test mixnet end-to-end with many clients. Proxy a protocol through mixnet.
 // The client sends the server a message and the server echoes it back.
 func TestMixnet(t *testing.T) {
