@@ -43,6 +43,11 @@ func runDummyServerReadOne(ch chan<- testResult) {
 		ch <- testResult{err, nil}
 		return
 	}
+
+	if _, err = c.Write(buf[:bytes]); err != nil {
+		ch <- testResult{err, nil}
+		return
+	}
 	ch <- testResult{nil, buf[:bytes]}
 }
 

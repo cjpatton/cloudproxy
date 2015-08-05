@@ -26,7 +26,7 @@ SCRIPT_PATH="$(readlink -e "$(dirname "$0")")"
 TEMPLATE="${SCRIPT_PATH}"/domain_template.pb
 ADMIN="$(gowhich tao_admin)"
 HOST_REL_PATH=linux_tao_host
-CA_ADDR="localhost:8124"
+CA_ADDR="127.0.0.1:8124"
 
 TEMP_FILE=`mktemp /tmp/domain_template.XXXXXX`
 cat "$TEMPLATE" | sed "s/REPLACE_WITH_DOMAIN_GUARD_TYPE/$GUARD/g" > $TEMP_FILE
@@ -69,7 +69,8 @@ echo
 
 ### Start a dummy server.
 echo "Starting a test server"
-echo "Who is this?" | nc -l 8080 >/dev/null &
+(echo "Who is this?" | nc -l 8080 > /tmp/serverout) &
+SERVERPID=$!
 
 ### Start mixnet router.
 echo "Starting mixnet router"
@@ -84,12 +85,16 @@ PROXYPID=$!
 sleep 1
 
 ### Run client.
-echo "Running a client"
-echo "Can you guess who I am?" | nc localhost 8080 -X 5 -x localhost:1080
+echo "Starting a client"
+echo "Can you guess who I am?" | nc 127.0.0.1 8080 -X 5 -x 127.0.0.1:1080 > /tmp/clientout
+
+echo "Server got: $(cat /tmp/serverout)"
+echo "Client got: $(cat /tmp/clientout)"
+echo
 
 echo "Cleaning up remaining programs"
+sudo rm -f ${DOMAIN_PUB}/linux_tao_host/admin_socket
 kill $PROXYPID
 kill $ROUTERPID
 killall tcca
 sudo kill $HOSTPID
-sudo rm -f ${DOMAIN_PUB}/linux_tao_host/admin_socket

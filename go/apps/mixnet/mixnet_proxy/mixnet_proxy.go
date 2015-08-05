@@ -14,6 +14,8 @@
 
 package main
 
+// TODO(cjpatton) signal handling.
+
 import (
 	"flag"
 	"net"
@@ -38,8 +40,8 @@ func serveClients(routerAddr string, proxy *mixnet.ProxyContext) error {
 }
 
 // Command line arguments.
-var proxyAddr = flag.String("proxy_addr", "localhost:1080", "Address and port for the Tao-delegated mixnet router.")
-var routerAddr = flag.String("router_addr", "localhost:8123", "Address and port for the Tao-delegated mixnet router.")
+var proxyAddr = flag.String("proxy_addr", "127.0.0.1:1080", "Address and port for the Tao-delegated mixnet router.")
+var routerAddr = flag.String("router_addr", "127.0.0.1:8123", "Address and port for the Tao-delegated mixnet router.")
 var network = flag.String("network", "tcp", "Network protocol for the mixnet proxy and router.")
 var configPath = flag.String("config", "tao.config", "Path to domain configuration file.")
 var timeoutDuration = flag.String("timeout", "10s", "Timeout on TCP connections, e.g. \"10s\".")

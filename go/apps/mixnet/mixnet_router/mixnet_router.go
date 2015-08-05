@@ -55,7 +55,7 @@ func serveMixnetProxies(hp *mixnet.RouterContext) error {
 }
 
 // Command line arguments.
-var routerAddr = flag.String("addr", "localhost:8123", "Address and port for the Tao-delegated mixnet router.")
+var routerAddr = flag.String("addr", "127.0.0.1:8123", "Address and port for the Tao-delegated mixnet router.")
 var routerNetwork = flag.String("network", "tcp", "Network protocol for the Tao-delegated mixnet router.")
 var configPath = flag.String("config", "tao.config", "Path to domain configuration file.")
 var batchSize = flag.Int("batch", 1, "Number of senders in a batch.")

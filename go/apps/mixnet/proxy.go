@@ -66,6 +66,7 @@ func (p *ProxyContext) Close() {
 
 // DialRouter connects anonymously to a remote Tao-delegated mixnet router.
 func (p *ProxyContext) DialRouter(network, addr string) (*Conn, error) {
+	// TODO(cjpatton) add tao.DialTimeout() method.
 	c, err := tao.Dial(network, addr, p.domain.Guard, p.domain.Keys.VerifyingKey, nil)
 	if err != nil {
 		return nil, err
@@ -259,6 +260,7 @@ func (p *ProxyContext) Accept() (net.Conn, string, error) {
 	// Second, reply with selected method.
 	if ver == SocksVersion && ok {
 		buf[1] = 0x00 // NO AUTHENTICATION REQUIRED
+		// TODO(cjpatton) set to 0x01 "fixes" proxying netcat
 	} else {
 		buf[1] = 0xff // NO ACCEPTABLE METHODS
 	}
@@ -330,20 +332,29 @@ func (p *ProxyContext) ServeClient(c net.Conn, addrs ...string) error {
 		bytes, err := c.Read(msg)
 		if err == io.EOF {
 			glog.Info("proxy: encountered EOF while serving")
-			break
+			return nil
+		} else if err != nil {
+			glog.Errorf("proxy: reading message from client: %s", err)
+			return err
 		}
+
+		if err = p.SendMessage(d, msg[:bytes]); err != nil {
+			glog.Errorf("proxy: writing message to mixnet: %s", err)
+			return err
+		}
+
+		reply, err := p.ReceiveMessage(d)
 		if err != nil {
-			glog.Errorf("proxy: error while serving client: %s", err)
+			glog.Errorf("proxy: receiving message from mixnet: %s", err)
 			return err
 		}
 
 		c.SetDeadline(time.Now().Add(p.timeout))
-		_, err = c.Write(msg[:bytes])
+		_, err = c.Write(reply)
 		if err == io.EOF {
 			glog.Info("proxy: encountered EOF while serving")
 			break
-		}
-		if err != nil {
+		} else if err != nil {
 			glog.Errorf("proxy: error while serving client: %s", err)
 			return err
 		}
