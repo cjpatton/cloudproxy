@@ -161,26 +161,33 @@ func runRouterHandleOneProxy(router *RouterContext, requestCount int, ch chan<- 
 	ch <- testResult{nil, nil}
 }
 
-func runRouterHandleProxy(router *RouterContext, clientCt, requestCt int, ch chan<- error) {
+func runRouterHandleProxy(router *RouterContext, clientCt, requestCt int, ch chan<- testResult) {
 	done := make(chan bool)
+
 	for i := 0; i < clientCt; i++ {
 		c, err := router.AcceptProxy()
 		if err != nil {
-			for j := 0; j < requestCt; j++ {
-				ch <- err
-			}
+			ch <- testResult{err, []byte{}}
+			return
 		}
+		defer c.Close()
+
 		go func(c *Conn) {
-			defer c.Close()
-			for j := 0; j < requestCt; j++ {
-				ch <- router.HandleProxy(c)
+			defer func() { done <- true }()
+			for i := 0; i < requestCt; i++ {
+				if err = router.HandleProxy(c); err != nil {
+					ch <- testResult{err, nil}
+					return
+				}
 			}
-			done <- true
 		}(c)
 	}
-	for i := 0; i < clientCt*requestCt; i++ {
+
+	for i := 0; i < clientCt; i++ {
 		<-done
 	}
+
+	ch <- testResult{nil, nil}
 }
 
 // Proxy dials a router, creates a circuit, and sends a message over
@@ -424,7 +431,7 @@ func TestCreateTimeout(t *testing.T) {
 	}
 	defer router.Close()
 	defer proxy.Close()
-	ch := make(chan error)
+	ch := make(chan testResult)
 
 	// The proxy should get a timeout if it's the only connecting client.
 	go runRouterHandleProxy(router, 1, 1, ch)
@@ -432,9 +439,9 @@ func TestCreateTimeout(t *testing.T) {
 	if err == nil || (err != nil && err.Error() != "read tcp 127.0.0.1:7007: i/o timeout") {
 		t.Error("should have got i/o timeout, got:", err)
 	}
-	err = <-ch
-	if err != nil {
-		t.Error(err)
+	res := <-ch
+	if res.err != nil {
+		t.Error(res.err)
 	}
 }
 
@@ -446,7 +453,7 @@ func TestSendMessageTimeout(t *testing.T) {
 	}
 	defer router.Close()
 	defer proxy.Close()
-	ch := make(chan error)
+	ch := make(chan testResult)
 	done := make(chan bool)
 
 	go runRouterHandleProxy(router, 2, 2, ch)

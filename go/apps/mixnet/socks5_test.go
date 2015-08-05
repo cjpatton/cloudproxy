@@ -17,6 +17,7 @@ package mixnet
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"testing"
 
 	netproxy "golang.org/x/net/proxy"
@@ -79,39 +80,72 @@ func runSocksClient(proxyAddr string, msg []byte) testResult {
 // Test mixnet end-to-end with many clients. Proxy a protocol through mixnet.
 // The client sends the server a message and the server echoes it back.
 func TestMixnet(t *testing.T) {
-	router, proxy, err := makeContext(1)
+
+	clientCt := 20
+	router, proxy, err := makeContext(clientCt)
 	if err != nil {
 		t.Fatal(err)
 	}
+	proxy.Close()
 	defer router.Close()
-	defer proxy.Close()
 
+	var res testResult
+	clientCh := make(chan testResult)
 	proxyCh := make(chan testResult)
 	routerCh := make(chan testResult)
 	dstCh := make(chan testResult)
 
-	go runSocksServerOne(proxy, proxyCh)
-	go runRouterHandleOneProxy(router, 3, routerCh)
-	go runDummyServerOne(dstCh)
+	go runRouterHandleProxy(router, clientCt, 3, routerCh)
+	go runDummyServer(clientCt, 1, dstCh)
 
-	msg := []byte(fmt.Sprintf("Hello, my name is %d", 1))
-	res := runSocksClient(proxyAddr, msg)
-	if res.err != nil {
-		t.Error(res.err)
-	}
-	t.Log(string(res.msg))
+	for i := 0; i < clientCt; i++ {
+		go func(pid int, ch chan<- testResult) {
+			proxyAddr := "127.0.0.1:" + strconv.Itoa(1080+pid)
+			proxy, err = makeProxyContext(proxyAddr)
+			if err != nil {
+				ch <- testResult{err, nil}
+				return
+			}
+			defer proxy.Close()
+			go runSocksServerOne(proxy, proxyCh)
 
-	res = <-dstCh
-	if res.err != nil {
-		t.Error(res.err)
-	}
-	res = <-routerCh
-	if res.err != nil && res.err != io.EOF {
-		t.Error(res.err)
-	}
-	res = <-proxyCh
-	if res.err != nil {
-		t.Error(res.err)
+			msg := []byte(fmt.Sprintf("Hello, my name is %d", pid))
+			ch <- runSocksClient(proxyAddr, msg)
+
+		}(i, clientCh)
 	}
 
+	// Wait for clients to finish.
+	for i := 0; i < clientCt; i++ {
+		res = <-clientCh
+		if res.err != nil {
+			t.Error(res.err)
+		} else {
+			t.Log("client got:", string(res.msg))
+		}
+	}
+
+	// Wait for proxies to finish.
+	for i := 0; i < clientCt; i++ {
+		res = <-proxyCh
+		if res.err != nil {
+			t.Error(res.err)
+		}
+	}
+
+	// Wait for server to finish.
+	for i := 0; i < clientCt; i++ {
+		res = <-dstCh
+		if res.err != nil {
+			t.Error(res.err)
+		}
+	}
+
+	// Wait for router to finish.
+	for i := 0; i < clientCt; i++ {
+		res = <-routerCh
+		if res.err != nil && res.err != io.EOF {
+			t.Error(res.err)
+		}
+	}
 }
