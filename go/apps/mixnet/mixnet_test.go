@@ -362,8 +362,8 @@ func TestProxyRouterRelay(t *testing.T) {
 		if res.err != nil {
 			t.Error(res.err)
 		} else if bytes.Compare(reply, msg[:l]) != 0 {
-			t.Errorf("relay (length=%s): received: %v", l, reply)
-			t.Errorf("relay (length=%s): sent: %x", l, msg[:l])
+			t.Errorf("relay (length=%d): received: %v", l, reply)
+			t.Errorf("relay (length=%d): sent: %x", l, msg[:l])
 		}
 	}
 }

@@ -25,8 +25,12 @@ import (
 	"github.com/golang/protobuf/proto"
 )
 
+// The Queueable object is passed through a channel and mutates the state of
+// the Queue in some manner; for example, it can set the destination
+// adddress or connection of a sender, add a message or request for reply
+// to the queue, or destroy any resources associated with the connection.
 type Queueable struct {
-	id      uint64
+	id      uint64 // Serial identififer of associated connection.
 	addr    string
 	msg     []byte
 	conn    net.Conn
@@ -100,7 +104,7 @@ func (sq *Queue) EnqueueReply(id uint64, reply chan []byte) {
 	sq.queue <- q
 }
 
-// EnqueueMsgRply creates a queueable object with a message and a reply channel
+// EnqueueMsgReply creates a queueable object with a message and a reply channel
 // and adds it to the queue.
 func (sq *Queue) EnqueueMsgReply(id uint64, msg []byte, reply chan []byte) {
 	q := new(Queueable)
