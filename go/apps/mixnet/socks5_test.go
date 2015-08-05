@@ -18,6 +18,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"os/exec"
 	"strconv"
 	"testing"
 	"time"
@@ -68,6 +70,72 @@ func runSocksClient(proxyAddr string, msg []byte) testResult {
 	}
 
 	return testResult{nil, reply[:bytes]}
+}
+
+func TestSocksProxy(t *testing.T) {
+	buf := make([]byte, 1000)
+
+	// Start SOCKS server.
+	ch := make(chan testResult)
+	proxy, err := makeProxyContext(proxyAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proxy.Close()
+	go runSocksServer(proxy, ch)
+
+	// Start server.
+	ncServe := exec.Command("nc", "-l", "8080")
+	out, err := ncServe.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ncServe.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sart client.
+	ncClient := exec.Command("nc", "localhost", "8080", "-X", "5", "-x", "localhost:1080")
+	in, err := ncClient.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cout, err := ncClient.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = in.Write([]byte("Hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ncClient.Start(); err != nil {
+		t.Error(err)
+	}
+
+	bytes, err := cout.Read(buf)
+	if err != nil && err != io.EOF {
+		t.Error(err)
+	}
+	t.Log("client got:", string(buf[:bytes]))
+
+	if err = ncClient.Wait(); err != nil {
+		t.Fatal(err)
+	}
+
+	bytes, err = out.Read(buf)
+	if err != nil && err != io.EOF {
+		t.Fatal(err)
+	}
+	t.Log("server got:", string(buf[:bytes]))
+
+	if err = ncServe.Wait(); err != nil {
+		t.Fatal(err)
+	}
+
+	<-ch
 }
 
 // Test mixnet end-to-end many clients. Proxy a protocol through mixnet. The
