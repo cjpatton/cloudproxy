@@ -15,23 +15,38 @@
 package mixnet
 
 import (
+	"fmt"
+	"io"
 	"testing"
-	"time"
 
 	netproxy "golang.org/x/net/proxy"
 )
 
 // Run proxy server.
-func runSocksServer(proxy *ProxyContext, ch chan<- testResult) {
+func runSocksServerOne(proxy *ProxyContext, ch chan<- testResult) {
 	c, addr, err := proxy.Accept()
 	if err != nil {
 		ch <- testResult{err, nil}
 		return
 	}
-
 	defer c.Close()
 
-	err = proxy.ServeClient(c, routerAddr, addr)
+	d, err := proxy.CreateCircuit(routerAddr, addr)
+	if err != nil {
+		ch <- testResult{err, nil}
+		return
+	}
+
+	if err = proxy.HandleClient(c, d); err != nil {
+		ch <- testResult{err, nil}
+		return
+	}
+
+	if err = proxy.DestroyCircuit(d); err != nil {
+		ch <- testResult{err, nil}
+		return
+	}
+
 	ch <- testResult{err, []byte(addr)}
 }
 
@@ -49,24 +64,54 @@ func runSocksClient(proxyAddr string, msg []byte) testResult {
 	}
 	defer c.Close()
 
-	c.SetDeadline(time.Now().Add(timeout))
 	if _, err = c.Write(msg); err != nil {
 		return testResult{err, nil}
 	}
 
-	reply := make([]byte, MaxMsgBytes)
-	c.SetDeadline(time.Now().Add(timeout))
-	bytes, err := c.Read(reply)
+	bytes, err := c.Read(msg)
 	if err != nil {
 		return testResult{err, nil}
 	}
 
-	return testResult{nil, reply[:bytes]}
+	return testResult{nil, msg[:bytes]}
 }
 
 // Test mixnet end-to-end with many clients. Proxy a protocol through mixnet.
 // The client sends the server a message and the server echoes it back.
 func TestMixnet(t *testing.T) {
+	router, proxy, err := makeContext(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer router.Close()
+	defer proxy.Close()
 
-	//TODO(cjpatton) rewrite!!
+	proxyCh := make(chan testResult)
+	routerCh := make(chan testResult)
+	dstCh := make(chan testResult)
+
+	go runSocksServerOne(proxy, proxyCh)
+	go runRouterHandleOneProxy(router, 3, routerCh)
+	go runDummyServerOne(dstCh)
+
+	msg := []byte(fmt.Sprintf("Hello, my name is %d", 1))
+	res := runSocksClient(proxyAddr, msg)
+	if res.err != nil {
+		t.Error(res.err)
+	}
+	t.Log(string(res.msg))
+
+	res = <-dstCh
+	if res.err != nil {
+		t.Error(res.err)
+	}
+	res = <-routerCh
+	if res.err != nil && res.err != io.EOF {
+		t.Error(res.err)
+	}
+	res = <-proxyCh
+	if res.err != nil {
+		t.Error(res.err)
+	}
+
 }

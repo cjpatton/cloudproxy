@@ -318,46 +318,48 @@ func (p *ProxyContext) Accept() (net.Conn, string, error) {
 // occurs), destroy the circuit.
 func (p *ProxyContext) ServeClient(c net.Conn, addrs ...string) error {
 
-	_ = glog.Error
 	d, err := p.CreateCircuit(addrs...)
 	if err != nil {
 		return err
 	}
-	defer p.DestroyCircuit(d)
 
 	for {
-
-		msg := make([]byte, MaxMsgBytes)
-		c.SetDeadline(time.Now().Add(p.timeout))
-		bytes, err := c.Read(msg)
-		if err == io.EOF {
-			glog.Info("proxy: encountered EOF while serving")
-			return nil
-		} else if err != nil {
-			glog.Errorf("proxy: reading message from client: %s", err)
-			return err
-		}
-
-		if err = p.SendMessage(d, msg[:bytes]); err != nil {
-			glog.Errorf("proxy: writing message to mixnet: %s", err)
-			return err
-		}
-
-		reply, err := p.ReceiveMessage(d)
-		if err != nil {
-			glog.Errorf("proxy: receiving message from mixnet: %s", err)
-			return err
-		}
-
-		c.SetDeadline(time.Now().Add(p.timeout))
-		_, err = c.Write(reply)
+		err = p.HandleClient(c, d)
 		if err == io.EOF {
 			glog.Info("proxy: encountered EOF while serving")
 			break
 		} else if err != nil {
-			glog.Errorf("proxy: error while serving client: %s", err)
-			return err
+			glog.Errorf("proxy: reading message from client: %s", err)
+			break
 		}
+	}
+
+	return p.DestroyCircuit(d)
+}
+
+// HandleClient relays a message read from client connection c to mixnet
+// connection  d and relay reply.
+func (p *ProxyContext) HandleClient(c net.Conn, d *Conn) error {
+
+	msg := make([]byte, MaxMsgBytes)
+	c.SetDeadline(time.Now().Add(p.timeout))
+	bytes, err := c.Read(msg)
+	if err != nil {
+		return err
+	}
+
+	if err = p.SendMessage(d, msg[:bytes]); err != nil {
+		return err
+	}
+
+	reply, err := p.ReceiveMessage(d)
+	if err != nil {
+		return err
+	}
+
+	c.SetDeadline(time.Now().Add(p.timeout))
+	if _, err = c.Write(reply); err != nil {
+		return err
 	}
 
 	return nil
