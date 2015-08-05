@@ -71,13 +71,13 @@ func main() {
 	flag.Parse()
 	timeout, err := time.ParseDuration(*timeoutDuration)
 	if err != nil {
-		glog.Errorf("failed to parse timeout duration: %s", err)
+		glog.Errorf("router: failed to parse timeout duration: %s", err)
 	}
 
 	hp, err := mixnet.NewRouterContext(*configPath, *routerNetwork, *routerAddr, *batchSize,
 		timeout, &x509Identity, tao.Parent())
 	if err != nil {
-		glog.Errorf("failed to configure server: %s", err)
+		glog.Errorf("failed to configure router: %s", err)
 	}
 
 	sigs := make(chan os.Signal, 1)
@@ -85,12 +85,12 @@ func main() {
 	go func() {
 		sig := <-sigs
 		hp.Close()
-		glog.Infof("closing on signal: %s", sig)
+		glog.Infof("router: closing on signal: %s", sig)
 		os.Exit(0)
 	}()
 
 	if err = serveMixnetProxies(hp); err != nil {
-		glog.Errorf("error while serving: %s", err)
+		glog.Errorf("router: error while serving: %s", err)
 	}
 
 	glog.Flush()

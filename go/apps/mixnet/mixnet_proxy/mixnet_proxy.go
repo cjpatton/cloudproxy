@@ -16,14 +16,29 @@ package main
 
 import (
 	"flag"
+	"net"
 	"time"
 
 	"github.com/golang/glog"
 	"github.com/jlmucb/cloudproxy/go/apps/mixnet"
 )
 
+func serveClients(routerAddr string, proxy *mixnet.ProxyContext) error {
+	for {
+		c, dstAddr, err := proxy.Accept()
+		if err != nil {
+			return err
+		}
+
+		go func(c net.Conn) {
+			defer c.Close()
+			proxy.ServeClient(c, routerAddr, dstAddr)
+		}(c)
+	}
+}
+
 // Command line arguments.
-var proxyAddr = flag.String("proxy_addr", "localhost:8123", "Address and port for the Tao-delegated mixnet router.")
+var proxyAddr = flag.String("proxy_addr", "localhost:1080", "Address and port for the Tao-delegated mixnet router.")
 var routerAddr = flag.String("router_addr", "localhost:8123", "Address and port for the Tao-delegated mixnet router.")
 var network = flag.String("network", "tcp", "Network protocol for the mixnet proxy and router.")
 var configPath = flag.String("config", "tao.config", "Path to domain configuration file.")
@@ -33,33 +48,17 @@ func main() {
 	flag.Parse()
 	timeout, err := time.ParseDuration(*timeoutDuration)
 	if err != nil {
-		glog.Fatalf("failed to parse timeout duration: %s", err)
+		glog.Fatalf("proxy: failed to parse timeout duration: %s", err)
 	}
 
-	proxy, err := mixnet.NewProxyContext(*configPath, *network, timeout)
+	proxy, err := mixnet.NewProxyContext(*configPath, *network, *proxyAddr, timeout)
 	if err != nil {
 		glog.Fatalf("failed to configure proxy: %s", err)
 	}
+	defer proxy.Close()
 
-	c, err := proxy.CreateCircuit(*routerAddr, "localhost:8080")
-	if err != nil {
-		glog.Fatalf("CreateCircuit(): %s", err)
-	}
-	defer c.Close()
-
-	if err = proxy.SendMessage(c, []byte("Hello!!!")); err != nil {
-		glog.Errorf("SendMessage(): %s", err)
-	}
-
-	reply, err := proxy.ReceiveMessage(c)
-	if err != nil {
-		glog.Errorf("ReceiveMessage(): %s", err)
-	} else {
-		glog.Info("Got: ", string(reply))
-	}
-
-	if err = proxy.DestroyCircuit(c); err != nil {
-		glog.Error("DestroyCircuit(): %s", err)
+	if err = serveClients(*routerAddr, proxy); err != nil {
+		glog.Errorf("proxy: error while serving: %s", err)
 	}
 
 	glog.Flush()

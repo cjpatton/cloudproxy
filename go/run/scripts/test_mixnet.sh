@@ -56,7 +56,7 @@ echo
 echo "Starting TaoCA"
 "$(gowhich tcca)" -config ${DOMAIN}/tao.config -password ${FAKE_PASS} &
 CAPID=$!
-sleep 2
+sleep 1
 echo
 
 ### Start LinuxHost.
@@ -64,24 +64,31 @@ echo "Starting LinuxHost"
 sudo "$(gowhich linux_host)" -config_path ${DOMAIN_PUB}/tao.config \
      -pass ${FAKE_PASS} &
 HOSTPID=$!
-sleep 2
+sleep 1
 echo
 
-### Start a dummy service
+### Start a dummy server.
 echo "Starting a test server"
 echo "Who is this?" | nc -l 8080 >/dev/null &
 
 ### Start mixnet router.
-echo "Starting Mixnet Router"
+echo "Starting mixnet router"
 ROUTERPID=$("$(gowhich tao_launch)" -sock ${DOMAIN_PUB}/linux_tao_host/admin_socket \
-	"$(gowhich mixnet_router)" -config=${DOMAIN_PUB}/tao.config)
+	"$(gowhich mixnet_router)" -config=${DOMAIN_PUB}/tao.config -batch=1)
+sleep 1
 
 ### Start mixnet proxy.
-echo "Starting Mixnet Proxy"
-"$(gowhich mixnet_proxy)" -config=${DOMAIN_PUB}/tao.config
-echo
+echo "Starting mixnet proxy"
+"$(gowhich mixnet_proxy)" -config=${DOMAIN_PUB}/tao.config &
+PROXYPID=$!
+sleep 1
+
+### Run client.
+echo "Running a client"
+echo "Can you guess who I am?" | nc localhost 8080 -X 5 -x localhost:1080
 
 echo "Cleaning up remaining programs"
+kill $PROXYPID
 kill $ROUTERPID
 killall tcca
 sudo kill $HOSTPID
